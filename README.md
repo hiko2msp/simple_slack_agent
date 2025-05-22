@@ -1,0 +1,2 @@
+# simple_slack_agent
+slackを使ってollamaベースのエージェントと対話するサーバーを立ち上げます
