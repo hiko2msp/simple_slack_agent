@@ -8,7 +8,7 @@ from ollama import AsyncClient
 from collections import defaultdict
 import base64
 import aiohttp
-
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -58,11 +58,12 @@ _messages = defaultdict(list)
 @app.event("message")
 async def handle_app_mention(body, say, ack):
     global _messages
-    user_message = body["event"]["text"]
+    print(json.dumps(body, ensure_ascii=False, indent=2))
+    await ack()
+
+    user_message = body["event"].get("text", "") or body["event"].get("message", {}).get("text", "")
     thread_ts = body["event"].get("thread_ts", body["event"]["ts"])
     # channel_id = body["event"]["channel"] # Useful for potential logging or context
-
-    await ack()
 
     is_recipe_request = "レシピ" in user_message
 
@@ -116,7 +117,7 @@ async def handle_app_mention(body, say, ack):
         ollama_messages.append(msg_dict)
 
     res = await client.chat(
-        model="qwen3:32b", # Or your preferred model
+        model="llama4:maverick", # Or your preferred model
         messages=ollama_messages # Pass the list of dicts
     )
     assistant_message = res.message.get('content', '').split('</think>')[-1] # Ensure content key exists
