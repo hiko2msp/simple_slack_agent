@@ -67,7 +67,7 @@ The application is configured through environment variables:
 -   `SLACK_ACCESS_TOKEN`: (Required) Your Slack app's Bot User OAuth Token.
 -   `SLACK_APP_TOKEN`: (Required) Your Slack app's App-Level Token for Socket Mode.
 -   `OLLAMA_HOST`: (Required) The URL of your Ollama instance.
--   **Default Ollama Model**: The bot currently uses the `qwen3:32b` model by default. This is hardcoded in `main.py`.
+-   **Default Ollama Model**: The bot currently uses the `llama4:maverick` model by default. This is hardcoded in `main.py`.
 
 ## Contributing
 Contributions are welcome! Please open an issue or submit a pull request.

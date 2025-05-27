@@ -28,15 +28,15 @@ The following environment variables are required:
 
 The specific Large Language Model used by the bot is defined directly in the `main.py` file.
 
--   **Current Model:** The bot is currently hardcoded to use the `qwen3:32b` model.
+-   **Current Model:** The bot is currently hardcoded to use the `llama4:maverick` model.
 -   **Location in Code:** You can find this setting within the `handle_app_mention` function in `main.py`:
     ```python
     res = await client.chat(
-        model="qwen3:32b",  # <--- This line specifies the Ollama model
+        model="llama4:maverick",  # <--- This line specifies the Ollama model
         messages=_messages[thread_ts]
     )
     ```
--   **Changing the Model:** To use a different model available in your Ollama instance, you can change the string value `"qwen3:32b"` to your desired model name (e.g., `"llama3:latest"`, `"mistral:latest"`).
+-   **Changing the Model:** To use a different model available in your Ollama instance, you can change the string value `"llama4:maverick"` to your desired model name (e.g., `"llama3:latest"`, `"mistral:latest"`).
 -   **Available Models:** For a list of available models and how to download them, please refer to the [official Ollama library documentation](https://ollama.com/library).
 
 ## System Prompt
