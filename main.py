@@ -3,7 +3,11 @@ from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from pydantic import BaseModel, Field
 from enum import Enum
+import io
+import sys
+import traceback
 import asyncio
+import re # Added for code extraction
 from ollama import AsyncClient, Image
 from collections import defaultdict
 import aiohttp
@@ -21,6 +25,54 @@ app = AsyncApp(
 )
 
 
+def execute_python_code(code_string: str) -> dict:
+    """
+    Executes a string of Python code and captures its stdout, stderr,
+    and any exceptions.
+
+    Args:
+        code_string: The Python code to execute.
+
+    Returns:
+        A dictionary with "stdout" and "stderr" keys.
+        "stderr" will contain the traceback if an exception occurred.
+    """
+    stdout_capture = io.StringIO()
+    stderr_capture = io.StringIO()
+    
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    
+    sys.stdout = stdout_capture
+    sys.stderr = stderr_capture
+    
+    try:
+        exec(code_string)
+        stdout_result = stdout_capture.getvalue()
+        stderr_result = stderr_capture.getvalue()
+    except Exception:
+        stderr_result = traceback.format_exc()
+        stdout_result = stdout_capture.getvalue() # Capture any stdout before exception
+    finally:
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
+        stdout_capture.close()
+        stderr_capture.close()
+        
+    return {"stdout": stdout_result, "stderr": stderr_result}
+
+
+def extract_python_code(text: str) -> str | None:
+    """
+    Extracts Python code from a markdown-like code block.
+    Returns the first block found, or None.
+    """
+    # Pattern to find ```python ... ```
+    pattern = re.compile(r"```python\s*\n(.*?)\n```", re.DOTALL)
+    match = pattern.search(text)
+    if match:
+        return match.group(1).strip()
+    return None
 
 class UserRole(str, Enum):
     system = "system"
@@ -112,20 +164,52 @@ async def handle_app_mention(body, say, ack):
     # If Message Pydantic models are passed directly, the ollama library handles serialisation.
     # Let's ensure this by passing the list of Message objects directly.
     
-    ollama_messages = []
+    ollama_messages_for_first_call = []
     for msg in _messages[thread_ts]:
         msg_dict = {"role": msg.role.value, "content": msg.content}
         if msg.images: # Only include images if present
             msg_dict["images"] = msg.images
-        ollama_messages.append(msg_dict)
+        ollama_messages_for_first_call.append(msg_dict)
 
     res = await client.chat(
         model="llama4:maverick", # Or your preferred model
-        messages=ollama_messages # Pass the list of dicts
+        messages=ollama_messages_for_first_call # Pass the list of dicts
     )
-    assistant_message = res.message.get('content', '').split('</think>')[-1] # Ensure content key exists
-    _messages[thread_ts].append(Message(role=UserRole.assistant, content=assistant_message))
-    await send(say, assistant_message, thread_ts)
+    assistant_message_content = res.message.get('content', '').split('</think>')[-1] # Ensure content key exists
+
+    # Attempt to extract python code from the assistant's message
+    code_to_execute = extract_python_code(assistant_message_content)
+
+    if code_to_execute:
+        # Store the original assistant message that contained the code
+        _messages[thread_ts].append(Message(role=UserRole.assistant, content=assistant_message_content))
+
+        # Execute the code
+        execution_result = execute_python_code(code_to_execute)
+        
+        # Create a tool message with the execution result
+        tool_message_content = json.dumps(execution_result)
+        _messages[thread_ts].append(Message(role=UserRole.tool, content=tool_message_content))
+
+        # Prepare messages for the second Ollama call
+        ollama_messages_for_second_call = []
+        for msg in _messages[thread_ts]:
+            msg_dict = {"role": msg.role.value, "content": msg.content}
+            # Images are not typically sent with tool responses or subsequent system messages
+            # if msg.images: 
+            #     msg_dict["images"] = msg.images
+            ollama_messages_for_second_call.append(msg_dict)
+        
+        # Call Ollama again with the tool's output
+        res = await client.chat(
+            model="llama4:maverick",
+            messages=ollama_messages_for_second_call
+        )
+        assistant_message_content = res.message.get('content', '').split('</think>')[-1]
+    
+    # Append the final assistant message (either from the first or second call)
+    _messages[thread_ts].append(Message(role=UserRole.assistant, content=assistant_message_content))
+    await send(say, assistant_message_content, thread_ts)
 
 
 
