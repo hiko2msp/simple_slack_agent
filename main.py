@@ -47,6 +47,8 @@ def execute_python_code(code_string: str) -> dict:
     sys.stderr = stderr_capture
     
     try:
+        print("Executing code:")
+        print(code_string)
         exec(code_string)
         stdout_result = stdout_capture.getvalue()
         stderr_result = stderr_capture.getvalue()
@@ -174,7 +176,7 @@ async def handle_app_mention(body, say, ack):
         model="llama4:maverick",
         messages=ollama_messages_for_first_call
     )
-    assistant_message_content = res.message.get('content', '').split('</think>')[-1] # Ensure content key exists
+    assistant_message_content = res.message.get('content', '').split('</think>')[-1]
 
     code_to_execute = extract_python_code(assistant_message_content)
 
