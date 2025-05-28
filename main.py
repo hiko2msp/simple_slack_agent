@@ -172,13 +172,15 @@ async def handle_app_mention(body, say, ack):
         ollama_messages_for_first_call.append(msg_dict)
 
     res = await client.chat(
-        model="llama4:maverick", # Or your preferred model
+        model="llama4_128k:latest", # Or your preferred model
         messages=ollama_messages_for_first_call # Pass the list of dicts
     )
     assistant_message_content = res.message.get('content', '').split('</think>')[-1] # Ensure content key exists
 
     # Attempt to extract python code from the assistant's message
     codes_to_execute = extract_python_code(assistant_message_content) # Now a list
+    print(f"Extracted code blocks: {assistant_message_content}")
+    print(f"Extracted code blocks: {codes_to_execute}")
 
     if codes_to_execute: # Check if the list is not empty
         # Store the original assistant message that contained the code blocks
@@ -188,6 +190,7 @@ async def handle_app_mention(body, say, ack):
         for code_string in codes_to_execute:
             execution_result = execute_python_code(code_string)
             tool_message_content = json.dumps(execution_result)
+            print(f"Execution result: {tool_message_content}")
             _messages[thread_ts].append(Message(role=UserRole.tool, content=tool_message_content))
 
         # Prepare messages for the second Ollama call, after all tool messages are added
@@ -201,7 +204,7 @@ async def handle_app_mention(body, say, ack):
         
         # Call Ollama again with the tool's output
         res = await client.chat(
-            model="llama4:maverick",
+            model="llama4_128k:latest",
             messages=ollama_messages_for_second_call
         )
         assistant_message_content = res.message.get('content', '').split('</think>')[-1]
@@ -211,7 +214,22 @@ async def handle_app_mention(body, say, ack):
     await send(say, assistant_message_content, thread_ts)
 
 
+async def warm_up():
+    """
+    Warm up the Ollama client by making a simple request.
+    This can help avoid cold start issues.
+    """
+    try:
+        await client.chat(
+            model="llama4_128k:latest",
+            messages=[{"role": "system", "content": "Warm up the model."}]
+        )
+        print("Ollama client warmed up successfully.")
+    except Exception as e:
+        print(f"Error during warm-up: {e}")
+
 
 if __name__ == "__main__":
     handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"], loop=asyncio.get_event_loop())
+    asyncio.get_event_loop().run_until_complete(warm_up())
     asyncio.get_event_loop().run_until_complete(handler.start_async())
