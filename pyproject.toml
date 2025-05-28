@@ -11,3 +11,12 @@ dependencies = [
     "pydantic>=2.11.4",
     "slack-bolt>=1.23.0",
 ]
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.20.0"
+]
