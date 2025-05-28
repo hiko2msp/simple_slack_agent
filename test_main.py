@@ -50,6 +50,24 @@ class TestMemoryFeature(unittest.TestCase):
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memories';")
             self.assertIsNotNone(cursor.fetchone(), "The 'memories' table should exist after init_db.")
+
+            # Verify that thread_ts is the primary key
+            cursor.execute("PRAGMA table_info('memories')")
+            columns_info = cursor.fetchall()
+            # Expected schema: (cid, name, type, notnull, dflt_value, pk)
+            found_thread_ts_pk = False
+            expected_pk_columns = {'thread_ts': 1} # Column name -> pk status (1=is PK, 0=not PK)
+            
+            for col in columns_info:
+                col_name = col[1]
+                is_pk = col[5]
+                if col_name == 'thread_ts':
+                    self.assertEqual(is_pk, 1, "thread_ts should be the primary key.")
+                    found_thread_ts_pk = True
+                else:
+                    self.assertEqual(is_pk, 0, f"{col_name} should not be part of the primary key.")
+            self.assertTrue(found_thread_ts_pk, "thread_ts primary key info not found.")
+
         finally:
             if conn:
                 conn.close()
@@ -96,7 +114,83 @@ class TestMemoryFeature(unittest.TestCase):
         no_memories = main.get_recent_memories()
         self.assertEqual(len(no_memories), 0, "Should retrieve 0 memories from an empty database.")
         # Re-initialize DB for other tests if necessary, though tearDown/setUp should handle it.
+        # main.init_db() # Already done by setUp for next test.
+
+        # Test overwrite behavior for a single thread_ts
+        # setUp ensures a clean DB for each test method.
+        overwrite_thread_ts = "overwrite_test_thread"
+        summary_initial = "Initial summary for overwrite test."
+        summary_updated = "Updated summary, should overwrite initial."
+
+        with patch('time.time', return_value=100.0):
+            main.add_memory(overwrite_thread_ts, summary_initial)
+        
+        conn = sqlite3.connect(main.DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT summary, timestamp FROM memories WHERE thread_ts = ?", (overwrite_thread_ts,))
+        row = cursor.fetchone()
+        self.assertIsNotNone(row, "Memory should have been added.")
+        self.assertEqual(row[0], summary_initial)
+        self.assertEqual(row[1], 100.0)
+        conn.close()
+
+        with patch('time.time', return_value=200.0):
+            main.add_memory(overwrite_thread_ts, summary_updated)
+
+        conn = sqlite3.connect(main.DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT summary, timestamp FROM memories WHERE thread_ts = ?", (overwrite_thread_ts,))
+        row_updated = cursor.fetchone()
+        self.assertIsNotNone(row_updated, "Memory should exist after update.")
+        self.assertEqual(row_updated[0], summary_updated, "Summary should be updated.")
+        self.assertEqual(row_updated[1], 200.0, "Timestamp should be updated.")
+        
+        cursor.execute("SELECT COUNT(*) FROM memories WHERE thread_ts = ?", (overwrite_thread_ts,))
+        count = cursor.fetchone()[0]
+        self.assertEqual(count, 1, "Should only be one memory entry per thread_ts due to UPSERT.")
+        conn.close()
+
+        # Adjusting the existing global retrieval test to ensure it fetches unique threads
+        # by their last update timestamp.
+        # Clear DB for this specific part of the test to ensure predictable results
+        if os.path.exists(main.DB_PATH):
+            os.remove(main.DB_PATH)
         main.init_db()
+
+        thread1 = "t1"
+        thread2 = "t2"
+        summary_t1_initial = "s1_t1"
+        summary_t2_initial = "s1_t2"
+        summary_t1_updated = "s2_t1" # This will be the latest for t1
+
+        with patch('time.time', side_effect=[10.0, 20.0, 30.0]):
+            main.add_memory(thread1, summary_t1_initial) # t1 @ ts=10
+            main.add_memory(thread2, summary_t2_initial) # t2 @ ts=20
+            main.add_memory(thread1, summary_t1_updated) # t1 @ ts=30 (t1 is now newest overall)
+        
+        # get_recent_memories fetches based on last update time (timestamp DESC)
+        # and then reverses the list for the prompt.
+        # So, newest (t1 updated) comes last in the list from get_recent_memories.
+        # Oldest of the limited set comes first.
+        
+        # limit=3 (all unique threads)
+        # Order of operations:
+        # 1. DB: (t1, 30, s2_t1), (t2, 20, s1_t2)
+        # 2. get_recent_memories SQL: Fetches in DESC order of timestamp: (t1, 30, s2_t1), (t2, 20, s1_t2)
+        # 3. Python list: [s2_t1, s1_t2]
+        # 4. Python list.reverse(): [s1_t2, s2_t1]
+        memories_all = main.get_recent_memories(limit=3)
+        self.assertEqual(len(memories_all), 2) # Only 2 unique threads
+        self.assertEqual(memories_all, [summary_t2_initial, summary_t1_updated])
+
+        # limit=1 (should pick the entry with the latest timestamp, which is t1's updated summary)
+        # 1. DB: (t1, 30, s2_t1), (t2, 20, s1_t2)
+        # 2. get_recent_memories SQL: Fetches (t1, 30, s2_t1)
+        # 3. Python list: [s2_t1]
+        # 4. Python list.reverse(): [s2_t1]
+        memories_limit_1 = main.get_recent_memories(limit=1)
+        self.assertEqual(len(memories_limit_1), 1)
+        self.assertEqual(memories_limit_1, [summary_t1_updated])
 
 
     @patch('main.get_recent_memories') # Mock this function as it's tested separately
@@ -123,7 +217,7 @@ class TestMemoryFeature(unittest.TestCase):
         mem_list = ["Past summary 1", "Past summary 2"]
         mock_get_recent_memories.return_value = mem_list
         
-        expected_memory_str = "\n\n## Context from Past Conversations (Summaries):\n- Past summary 1\n- Past summary 2"
+        expected_memory_str = "\n\n## Reference from Past Conversations (Summaries) - Use these lightly for context if relevant:\n- Past summary 1\n- Past summary 2" # Updated header
         expected_prompt_with_mems = base_prompt + expected_memory_str
         
         prompt_with_mems = main._construct_initial_system_prompt("thread_s3", base_prompt, False)
@@ -136,7 +230,7 @@ class TestMemoryFeature(unittest.TestCase):
         recipe_mem_list = ["Recipe context 1", "Recipe context 2"]
         mock_get_recent_memories.return_value = recipe_mem_list
 
-        expected_recipe_memory_str = "\n\n## Context from Past Conversations (Summaries):\n- Recipe context 1\n- Recipe context 2"
+        expected_recipe_memory_str = "\n\n## Reference from Past Conversations (Summaries) - Use these lightly for context if relevant:\n- Recipe context 1\n- Recipe context 2" # Updated header
         expected_recipe_prompt_with_mems = recipe_base_prompt + expected_recipe_memory_str
 
         # Note: base_prompt is passed but _construct_initial_system_prompt should ignore it if is_recipe is True

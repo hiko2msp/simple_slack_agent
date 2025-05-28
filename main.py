@@ -73,17 +73,17 @@ def init_db():
         cur = con.cursor()
         cur.execute('''
             CREATE TABLE IF NOT EXISTS memories (
-                thread_ts TEXT NOT NULL,
+                thread_ts TEXT NOT NULL PRIMARY KEY,
                 timestamp REAL NOT NULL,
-                summary TEXT NOT NULL,
-                PRIMARY KEY (thread_ts, timestamp) 
+                summary TEXT NOT NULL
             )
         ''')
+        # Index on timestamp remains useful for ordering by last update time
         cur.execute('''
             CREATE INDEX IF NOT EXISTS idx_memories_timestamp ON memories (timestamp DESC)
         ''')
         con.commit()
-        print("Database initialized successfully.")
+        print("Database initialized successfully with updated schema.")
     except sqlite3.Error as e:
         print(f"Database initialization error: {e}")
     finally:
@@ -94,12 +94,17 @@ def add_memory(thread_ts: str, summary: str):
     try:
         con = sqlite3.connect(DB_PATH)
         cur = con.cursor()
-        cur.execute("INSERT INTO memories (thread_ts, timestamp, summary) VALUES (?, ?, ?)",
-                    (thread_ts, time.time(), summary))
+        current_time = time.time() # Capture time once
+        cur.execute("""
+            INSERT INTO memories (thread_ts, timestamp, summary) VALUES (?, ?, ?)
+            ON CONFLICT(thread_ts) DO UPDATE SET
+                timestamp = excluded.timestamp,
+                summary = excluded.summary
+        """, (thread_ts, current_time, summary)) # Pass current_time
         con.commit()
-        print(f"Memory added for thread {thread_ts}")
+        print(f"Memory added/updated for thread {thread_ts}")
     except sqlite3.Error as e:
-        print(f"Error adding memory for thread {thread_ts}: {e}")
+        print(f"Error adding/updating memory for thread {thread_ts}: {e}")
     finally:
         if con:
             con.close()
@@ -136,7 +141,7 @@ def _construct_initial_system_prompt(thread_ts: str, base_prompt: str, is_recipe
     if MEMORY_FEATURE_ENABLED:
         recent_memories = get_recent_memories() # Removed thread_ts
         if recent_memories:
-            memory_header = "\n\n## Context from Past Conversations (Summaries):\n"
+            memory_header = "\n\n## Reference from Past Conversations (Summaries) - Use these lightly for context if relevant:\n"
             formatted_memories = "\n".join([f"- {mem}" for mem in recent_memories])
             system_prompt_content += memory_header + formatted_memories
             print(f"System prompt for thread {thread_ts} now includes {len(recent_memories)} memories.")
