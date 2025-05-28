@@ -472,4 +472,3 @@ if __name__ == '__main__':
 # The tests for `handle_app_mention` now cover the user message having images and the system prompt changing.
 # The system prompt check is basic ("レシピ提案のエキスパートです") but confirms the logic branch.
 # The check for images in `ollama_messages_arg` confirms that images are passed to the Ollama client.
-```

@@ -11,3 +11,8 @@ dependencies = [
     "pydantic>=2.11.4",
     "slack-bolt>=1.23.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+]

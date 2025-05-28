@@ -173,7 +173,7 @@ async def handle_app_mention(body, say, ack):
         ollama_messages_for_first_call.append(msg_dict)
 
     res = await client.chat(
-        model="llama4:maverick",
+        model="llama4_128k:latest",
         messages=ollama_messages_for_first_call
     )
     assistant_message_content = res.message.get('content', '').split('</think>')[-1]
@@ -193,7 +193,7 @@ async def handle_app_mention(body, say, ack):
             ollama_messages_for_second_call.append(msg_dict)
         
         res = await client.chat(
-            model="llama4:maverick",
+            model="llama4_128k:latest",
             messages=ollama_messages_for_second_call
         )
         assistant_message_content = res.message.get('content', '').split('</think>')[-1]
