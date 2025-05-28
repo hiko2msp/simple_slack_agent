@@ -48,43 +48,37 @@ class TestMainFunctions(unittest.IsolatedAsyncioTestCase):
     # --- Tests for extract_python_code ---
     def test_extract_python_code_valid(self):
         text = "Some text before\n```python\nprint(\"hello\")\n```\nSome text after"
-        expected = 'print("hello")'
+        expected = ['print("hello")'] # Expect a list
         self.assertEqual(extract_python_code(text), expected)
 
     def test_extract_python_code_no_leading_newline(self):
         text = "```python\nprint(\"hello\")\n```"
-        expected = 'print("hello")'
+        expected = ['print("hello")'] # Expect a list
         self.assertEqual(extract_python_code(text), expected)
 
     def test_extract_python_code_no_trailing_newline(self):
-        text = "```python\nprint(\"hello\")```" # This might fail if regex expects \n before ```
-        # Let's adjust the regex in main.py if this is a desired valid case,
-        # or adjust the test if the current regex is strict.
-        # Current regex: r"```python\s*\n(.*?)\n```" expects \n before final ```
-        # For now, assuming the current regex is the source of truth.
-        # To make this pass, the input text would need a newline before the closing backticks.
-        # Or, the regex could be "```python\s*\n(.*?)\s*\n?```"
+        # Current regex r"```python\s*\n(.*?)\n```" requires a newline before the closing ```.
+        # This test uses text that conforms to this.
         text_passing_current_regex = "```python\nprint(\"hello\")\n```"
-        expected = 'print("hello")'
+        expected = ['print("hello")'] # Expect a list
         self.assertEqual(extract_python_code(text_passing_current_regex), expected)
-
 
     def test_extract_python_code_no_code_block(self):
         text = "This is a normal message."
-        self.assertIsNone(extract_python_code(text))
+        self.assertEqual(extract_python_code(text), []) # Expect empty list
 
     def test_extract_python_code_different_language(self):
         text = "```javascript\nconsole.log(\"hello\")\n```"
-        self.assertIsNone(extract_python_code(text))
+        self.assertEqual(extract_python_code(text), []) # Expect empty list
 
     def test_extract_python_code_multiple_blocks(self):
         text = "```python\nprint(\"first\")\n```\nSome other text\n```python\nprint(\"second\")\n```"
-        expected = 'print("first")' # Expects the first block
+        expected = ['print("first")', 'print("second")'] # Expects a list of all blocks
         self.assertEqual(extract_python_code(text), expected)
 
     def test_extract_python_code_empty_block(self):
         text = "```python\n\n```"
-        expected = "" # Empty code block
+        expected = [""] # Expect a list with an empty string
         self.assertEqual(extract_python_code(text), expected)
 
     # --- Tests for execute_python_code ---
@@ -118,7 +112,7 @@ class TestMainFunctions(unittest.IsolatedAsyncioTestCase):
     # and the 'say' function, and 'ack'.
 
     @patch('main.client', new_callable=AsyncMock) # Mock the Ollama client instance in main.py
-    async def test_handle_app_mention_successful_python_execution(self, mock_ollama_client):
+    async def test_handle_app_mention_single_python_execution(self, mock_ollama_client): # Renamed
         # 1. Setup Mocks
         mock_say = AsyncMock()
         mock_ack = AsyncMock()
@@ -133,7 +127,7 @@ class TestMainFunctions(unittest.IsolatedAsyncioTestCase):
         body = {
             "event": {
                 "type": "message",
-                "text": "Calculate 10+5",
+                "text": "Calculate 10+5 (single)", # Updated for clarity
                 "user": "U123",
                 "ts": "12345.67890",
                 "channel": "C123",
@@ -165,7 +159,7 @@ class TestMainFunctions(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_messages[thread_ts][2].content, "Let me calculate that: ```python\nprint(10+5)\n```")
         
         self.assertEqual(_messages[thread_ts][3].role, UserRole.tool)
-        tool_content = json.loads(_messages[thread_ts][3].content)
+        tool_content = json.loads(_messages[thread_ts][3].content) # Only one tool message
         self.assertEqual(tool_content["stdout"], "15\n")
         self.assertEqual(tool_content["stderr"], "")
         
@@ -182,7 +176,7 @@ class TestMainFunctions(unittest.IsolatedAsyncioTestCase):
         )
 
     @patch('main.client', new_callable=AsyncMock)
-    async def test_handle_app_mention_python_execution_error(self, mock_ollama_client):
+    async def test_handle_app_mention_single_python_execution_error(self, mock_ollama_client): # Renamed
         mock_say = AsyncMock()
         mock_ack = AsyncMock()
 
@@ -194,7 +188,7 @@ class TestMainFunctions(unittest.IsolatedAsyncioTestCase):
         body = {
             "event": {
                 "type": "message",
-                "text": "Divide by zero",
+                "text": "Divide by zero (single)", # Updated for clarity
                 "user": "U123",
                 "ts": "12345.67891",
                 "thread_ts": "12345.67891"
@@ -208,7 +202,7 @@ class TestMainFunctions(unittest.IsolatedAsyncioTestCase):
         
         thread_ts = body["event"]["thread_ts"]
         self.assertEqual(len(_messages[thread_ts]), 5)
-        self.assertEqual(_messages[thread_ts][3].role, UserRole.tool)
+        self.assertEqual(_messages[thread_ts][3].role, UserRole.tool) # Only one tool message
         tool_content = json.loads(_messages[thread_ts][3].content)
         self.assertEqual(tool_content["stdout"], "")
         self.assertIn("ZeroDivisionError", tool_content["stderr"])
@@ -220,6 +214,113 @@ class TestMainFunctions(unittest.IsolatedAsyncioTestCase):
             },
             thread_ts=thread_ts
         )
+
+    @patch('main.client', new_callable=AsyncMock)
+    async def test_handle_app_mention_multiple_python_executions(self, mock_ollama_client):
+        mock_say = AsyncMock()
+        mock_ack = AsyncMock()
+
+        mock_ollama_client.chat.side_effect = [
+            MagicMock(message={"content": "Block 1: ```python\nprint('block1')\n```\nBlock 2: ```python\nprint(2+2)\n```"}),
+            MagicMock(message={"content": "Results are 'block1' and 4."})
+        ]
+
+        body = {
+            "event": {
+                "type": "message",
+                "text": "Run multiple blocks",
+                "user": "U123",
+                "ts": "12345.67890",
+                "thread_ts": "12345.67890"
+            }
+        }
+        with patch('main.download_and_encode_images', new_callable=AsyncMock, return_value=[]) as mock_download:
+            await handle_app_mention(body=body, say=mock_say, ack=mock_ack)
+
+        mock_ack.assert_called_once()
+        self.assertEqual(mock_ollama_client.chat.call_count, 2)
+        
+        thread_ts = body["event"]["thread_ts"]
+        # Expected: System, User, Assistant (code), Tool 1, Tool 2, Assistant (final)
+        self.assertEqual(len(_messages[thread_ts]), 6) 
+        
+        self.assertEqual(_messages[thread_ts][0].role, UserRole.system)
+        self.assertEqual(_messages[thread_ts][1].role, UserRole.user)
+        self.assertEqual(_messages[thread_ts][1].content, "Run multiple blocks")
+        
+        self.assertEqual(_messages[thread_ts][2].role, UserRole.assistant)
+        self.assertEqual(_messages[thread_ts][2].content, "Block 1: ```python\nprint('block1')\n```\nBlock 2: ```python\nprint(2+2)\n```")
+        
+        self.assertEqual(_messages[thread_ts][3].role, UserRole.tool)
+        tool_1_content = json.loads(_messages[thread_ts][3].content)
+        self.assertEqual(tool_1_content["stdout"], "block1\n")
+        self.assertEqual(tool_1_content["stderr"], "")
+        
+        self.assertEqual(_messages[thread_ts][4].role, UserRole.tool)
+        tool_2_content = json.loads(_messages[thread_ts][4].content)
+        self.assertEqual(tool_2_content["stdout"], "4\n")
+        self.assertEqual(tool_2_content["stderr"], "")
+
+        self.assertEqual(_messages[thread_ts][5].role, UserRole.assistant)
+        self.assertEqual(_messages[thread_ts][5].content, "Results are 'block1' and 4.")
+
+        mock_say.assert_called_once_with(
+            {
+                "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": "Results are 'block1' and 4."}}],
+                "text": "Results are 'block1' and 4.",
+            },
+            thread_ts=thread_ts
+        )
+
+    @patch('main.client', new_callable=AsyncMock)
+    async def test_handle_app_mention_multiple_python_executions_one_error(self, mock_ollama_client):
+        mock_say = AsyncMock()
+        mock_ack = AsyncMock()
+
+        mock_ollama_client.chat.side_effect = [
+            MagicMock(message={"content": "```python\nprint('OK')\n```\nThen error: ```python\nprint(1/0)\n```"}),
+            MagicMock(message={"content": "First was OK, second had an error."})
+        ]
+
+        body = {
+            "event": {
+                "type": "message",
+                "text": "Run multiple blocks, one with error",
+                "user": "U123",
+                "ts": "12345.67891", # Different ts
+                "thread_ts": "12345.67891"
+            }
+        }
+        with patch('main.download_and_encode_images', new_callable=AsyncMock, return_value=[]) as mock_download:
+            await handle_app_mention(body=body, say=mock_say, ack=mock_ack)
+
+        mock_ack.assert_called_once()
+        self.assertEqual(mock_ollama_client.chat.call_count, 2)
+        
+        thread_ts = body["event"]["thread_ts"]
+        self.assertEqual(len(_messages[thread_ts]), 6) # System, User, Assistant (code), Tool 1, Tool 2, Assistant (final)
+        
+        self.assertEqual(_messages[thread_ts][3].role, UserRole.tool)
+        tool_1_content = json.loads(_messages[thread_ts][3].content)
+        self.assertEqual(tool_1_content["stdout"], "OK\n")
+        self.assertEqual(tool_1_content["stderr"], "")
+        
+        self.assertEqual(_messages[thread_ts][4].role, UserRole.tool)
+        tool_2_content = json.loads(_messages[thread_ts][4].content)
+        self.assertEqual(tool_2_content["stdout"], "")
+        self.assertIn("ZeroDivisionError", tool_2_content["stderr"])
+
+        self.assertEqual(_messages[thread_ts][5].role, UserRole.assistant)
+        self.assertEqual(_messages[thread_ts][5].content, "First was OK, second had an error.")
+
+        mock_say.assert_called_once_with(
+            {
+                "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": "First was OK, second had an error."}}],
+                "text": "First was OK, second had an error.",
+            },
+            thread_ts=thread_ts
+        )
+
 
     @patch('main.client', new_callable=AsyncMock)
     async def test_handle_app_mention_no_python_code(self, mock_ollama_client):

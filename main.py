@@ -62,17 +62,17 @@ def execute_python_code(code_string: str) -> dict:
     return {"stdout": stdout_result, "stderr": stderr_result}
 
 
-def extract_python_code(text: str) -> str | None:
+def extract_python_code(text: str) -> list[str]:
     """
-    Extracts Python code from a markdown-like code block.
-    Returns the first block found, or None.
+    Extracts all Python code snippets from markdown-like code blocks.
+    Returns a list of string code snippets.
     """
     # Pattern to find ```python ... ```
+    # re.findall will return a list of all captured groups (the code itself)
     pattern = re.compile(r"```python\s*\n(.*?)\n```", re.DOTALL)
-    match = pattern.search(text)
-    if match:
-        return match.group(1).strip()
-    return None
+    matches = pattern.findall(text)
+    # strip() each matched code block content
+    return [match.strip() for match in matches]
 
 class UserRole(str, Enum):
     system = "system"
@@ -178,20 +178,19 @@ async def handle_app_mention(body, say, ack):
     assistant_message_content = res.message.get('content', '').split('</think>')[-1] # Ensure content key exists
 
     # Attempt to extract python code from the assistant's message
-    code_to_execute = extract_python_code(assistant_message_content)
+    codes_to_execute = extract_python_code(assistant_message_content) # Now a list
 
-    if code_to_execute:
-        # Store the original assistant message that contained the code
+    if codes_to_execute: # Check if the list is not empty
+        # Store the original assistant message that contained the code blocks
         _messages[thread_ts].append(Message(role=UserRole.assistant, content=assistant_message_content))
 
-        # Execute the code
-        execution_result = execute_python_code(code_to_execute)
-        
-        # Create a tool message with the execution result
-        tool_message_content = json.dumps(execution_result)
-        _messages[thread_ts].append(Message(role=UserRole.tool, content=tool_message_content))
+        # Loop through each extracted code string and process it
+        for code_string in codes_to_execute:
+            execution_result = execute_python_code(code_string)
+            tool_message_content = json.dumps(execution_result)
+            _messages[thread_ts].append(Message(role=UserRole.tool, content=tool_message_content))
 
-        # Prepare messages for the second Ollama call
+        # Prepare messages for the second Ollama call, after all tool messages are added
         ollama_messages_for_second_call = []
         for msg in _messages[thread_ts]:
             msg_dict = {"role": msg.role.value, "content": msg.content}
