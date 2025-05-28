@@ -25,7 +25,7 @@ The following environment variables are required:
     -   **Source:** This depends on where your Ollama service is hosted.
 
 -   `MEMORY_FEATURE_ENABLED`:
-    -   **Description:** Set to `true` to enable the conversation memory feature. If not set, it defaults to `false`. When enabled, the bot will store summaries of interactions in a local `memory.db` file and use the most recent summaries to provide context for new interactions within the same Slack thread.
+    -   **Description:** Set to `true` to enable the conversation memory feature. If not set, it defaults to `false`. When enabled, the bot will store summaries of interactions in a local `memory.db` file and use the most recent summaries from the global pool to provide context for new interactions.
     -   **Example:** `MEMORY_FEATURE_ENABLED=true`
     -   **Default:** `false`
 

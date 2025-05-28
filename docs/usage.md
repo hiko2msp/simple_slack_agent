@@ -43,10 +43,10 @@ The bot listens for messages in channels it has been added to and in direct mess
 
 This bot includes an optional conversation memory feature. If enabled by the administrator (using the `MEMORY_FEATURE_ENABLED` environment variable), the bot will:
 1.  Summarize the key points of your interaction with it at the end of each exchange.
-2.  Store these summaries locally.
-3.  When you start a new conversation in the same thread after a pause, or if the bot is restarted, it will load a summary of your recent past interactions in that thread. This helps the bot maintain context over longer periods or across sessions.
+2.  Store these summaries locally in a shared database.
+3.  When you start a new conversation, it will load a summary of recent global past interactions. This helps the bot maintain context over longer periods or across sessions by providing it with a "memory" of what was previously discussed globally.
 
-This feature enhances the bot's ability to follow along with extended discussions by providing it with a "memory" of what was previously discussed in that specific thread. The memory is specific to each thread and is not shared across different threads or channels.
+The memory is now global; summaries from any interaction can be used as context for any new interaction.
 
 ## Example Interaction
 

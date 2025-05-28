@@ -79,6 +79,9 @@ def init_db():
                 PRIMARY KEY (thread_ts, timestamp) 
             )
         ''')
+        cur.execute('''
+            CREATE INDEX IF NOT EXISTS idx_memories_timestamp ON memories (timestamp DESC)
+        ''')
         con.commit()
         print("Database initialized successfully.")
     except sqlite3.Error as e:
@@ -101,24 +104,43 @@ def add_memory(thread_ts: str, summary: str):
         if con:
             con.close()
 
-def get_recent_memories(thread_ts: str, limit: int = 5) -> list[str]:
+def get_recent_memories(limit: int = 5) -> list[str]: # New signature
     memories = []
     try:
         con = sqlite3.connect(DB_PATH)
         cur = con.cursor()
-        cur.execute("SELECT summary FROM memories WHERE thread_ts = ? ORDER BY timestamp DESC LIMIT ?",
-                    (thread_ts, limit))
-        rows = cur.fetchall() # Fetches all rows that match the query
-        memories = [row[0] for row in rows] # Extract summary from each row
-        # The summaries should be in chronological order for the prompt, so reverse them
-        memories.reverse() 
-        print(f"Retrieved {len(memories)} memories for thread {thread_ts}")
+        # cur.execute("SELECT summary FROM memories WHERE thread_ts = ? ORDER BY timestamp DESC LIMIT ?",
+        #             (thread_ts, limit)) # Old query
+        cur.execute("SELECT summary FROM memories ORDER BY timestamp DESC LIMIT ?",
+                    (limit,)) # New query
+        rows = cur.fetchall()
+        memories = [row[0] for row in rows]
+        memories.reverse() # Maintain chronological order for the prompt
+        # print(f"Retrieved {len(memories)} memories for thread {thread_ts}") # Old log
+        print(f"Retrieved {len(memories)} global memories") # New log
     except sqlite3.Error as e:
-        print(f"Error retrieving memories for thread {thread_ts}: {e}")
+        # print(f"Error retrieving memories for thread {thread_ts}: {e}") # Old log
+        print(f"Error retrieving global memories: {e}") # New log
     finally:
         if con:
             con.close()
     return memories
+
+def _construct_initial_system_prompt(thread_ts: str, base_prompt: str, is_recipe: bool) -> str:
+    # Determine the correct base prompt based on is_recipe
+    if is_recipe:
+        system_prompt_content = "あなたはレシピ提案のエキスパートです。提供された食材の画像に基づいて、ユーザーが作れる料理のレシピ案を3つ考えてください。材料と分量だけを明確に、markdown形式で提示してください。"
+    else:
+        system_prompt_content = base_prompt
+
+    if MEMORY_FEATURE_ENABLED:
+        recent_memories = get_recent_memories() # Removed thread_ts
+        if recent_memories:
+            memory_header = "\n\n## Context from Past Conversations (Summaries):\n"
+            formatted_memories = "\n".join([f"- {mem}" for mem in recent_memories])
+            system_prompt_content += memory_header + formatted_memories
+            print(f"System prompt for thread {thread_ts} now includes {len(recent_memories)} memories.")
+    return system_prompt_content
 
 def extract_python_code(text: str) -> list[str]:
     """
@@ -202,22 +224,11 @@ async def handle_app_mention(body, say, ack):
     is_recipe_request = "レシピ" in user_message
 
     if not _messages.get(thread_ts):
-        system_prompt_content = ""
-        if is_recipe_request:
-            system_prompt_content = "あなたはレシピ提案のエキスパートです。提供された食材の画像に基づいて、ユーザーが作れる料理のレシピ案を3つ考えてください。材料と分量だけを明確に、markdown形式で提示してください。"
-        else:
-            system_prompt_content = "あなたは優秀なエージェントです。謙虚に振る舞いユーザーと簡潔に対話を行います。markdown形式で回答してください"
-
-        if MEMORY_FEATURE_ENABLED:
-            recent_memories = get_recent_memories(thread_ts)
-            if recent_memories:
-                memory_header = "\n\n## Context from Past Conversations (Summaries):\n"
-                formatted_memories = "\n".join([f"- {mem}" for mem in recent_memories])
-                system_prompt_content += memory_header + formatted_memories
-                print(f"System prompt for thread {thread_ts} now includes {len(recent_memories)} memories.")
-
+        base_system_prompt = "あなたは優秀なエージェントです。謙虚に振る舞いユーザーと簡潔に対話を行います。markdown形式で回答してください"
+        # is_recipe_request is already defined
+        final_system_prompt = _construct_initial_system_prompt(thread_ts, base_system_prompt, is_recipe_request)
         _messages[thread_ts].append(
-            Message(role=UserRole.system, content=system_prompt_content),
+            Message(role=UserRole.system, content=final_system_prompt)
         )
 
     base64_images = []
