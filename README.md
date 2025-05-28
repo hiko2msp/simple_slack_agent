@@ -71,6 +71,18 @@ The application is configured through environment variables:
 -   `MEMORY_FEATURE_ENABLED`: (Optional) Set to `true` to enable the conversation memory feature. Defaults to `false`. When enabled, the bot will summarize interactions and recall recent summaries from past interactions to provide context.
 -   **Default Ollama Model**: The bot currently uses the `llama4:maverick` model by default. This is hardcoded in `main.py`.
 
+## Viewing Conversation Memories
+
+A utility script `view_memories.py` is provided to inspect the contents of the `memory.db` SQLite database, where conversation summaries are stored (if the memory feature is enabled).
+
+To use it, run the following command from the root of the repository:
+
+```bash
+python view_memories.py
+```
+
+The script will print a formatted list of all stored memories, with the newest entries appearing first. It displays the timestamp (in UTC), the thread timestamp (`thread_ts`) associated with the memory, and a snippet of the summary.
+
 ## Contributing
 Contributions are welcome! Please open an issue or submit a pull request.
 
