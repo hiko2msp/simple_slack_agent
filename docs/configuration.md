@@ -24,6 +24,11 @@ The following environment variables are required:
     -   **Example:** `http://localhost:11434` (if Ollama is running locally on the default port)
     -   **Source:** This depends on where your Ollama service is hosted.
 
+-   `MEMORY_FEATURE_ENABLED`:
+    -   **Description:** Set to `true` to enable the conversation memory feature. If not set, it defaults to `false`. When enabled, the bot will store summaries of interactions in a local `memory.db` file and use the most recent summaries to provide context for new interactions within the same Slack thread.
+    -   **Example:** `MEMORY_FEATURE_ENABLED=true`
+    -   **Default:** `false`
+
 ## Ollama Model
 
 The specific Large Language Model used by the bot is defined directly in the `main.py` file.

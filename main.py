@@ -13,8 +13,13 @@ from collections import defaultdict
 import aiohttp
 import json
 from dotenv import load_dotenv
+import sqlite3
+import time
 
 load_dotenv()
+
+DB_PATH = "memory.db"
+MEMORY_FEATURE_ENABLED = os.getenv("MEMORY_FEATURE_ENABLED", "false").lower() == "true"
 
 
 client = AsyncClient(
@@ -61,6 +66,59 @@ def execute_python_code(code_string: str) -> dict:
         
     return {"stdout": stdout_result, "stderr": stderr_result}
 
+
+def init_db():
+    try:
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS memories (
+                thread_ts TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                summary TEXT NOT NULL,
+                PRIMARY KEY (thread_ts, timestamp) 
+            )
+        ''')
+        con.commit()
+        print("Database initialized successfully.")
+    except sqlite3.Error as e:
+        print(f"Database initialization error: {e}")
+    finally:
+        if con:
+            con.close()
+
+def add_memory(thread_ts: str, summary: str):
+    try:
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        cur.execute("INSERT INTO memories (thread_ts, timestamp, summary) VALUES (?, ?, ?)",
+                    (thread_ts, time.time(), summary))
+        con.commit()
+        print(f"Memory added for thread {thread_ts}")
+    except sqlite3.Error as e:
+        print(f"Error adding memory for thread {thread_ts}: {e}")
+    finally:
+        if con:
+            con.close()
+
+def get_recent_memories(thread_ts: str, limit: int = 5) -> list[str]:
+    memories = []
+    try:
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        cur.execute("SELECT summary FROM memories WHERE thread_ts = ? ORDER BY timestamp DESC LIMIT ?",
+                    (thread_ts, limit))
+        rows = cur.fetchall() # Fetches all rows that match the query
+        memories = [row[0] for row in rows] # Extract summary from each row
+        # The summaries should be in chronological order for the prompt, so reverse them
+        memories.reverse() 
+        print(f"Retrieved {len(memories)} memories for thread {thread_ts}")
+    except sqlite3.Error as e:
+        print(f"Error retrieving memories for thread {thread_ts}: {e}")
+    finally:
+        if con:
+            con.close()
+    return memories
 
 def extract_python_code(text: str) -> list[str]:
     """
@@ -149,6 +207,15 @@ async def handle_app_mention(body, say, ack):
             system_prompt_content = "あなたはレシピ提案のエキスパートです。提供された食材の画像に基づいて、ユーザーが作れる料理のレシピ案を3つ考えてください。材料と分量だけを明確に、markdown形式で提示してください。"
         else:
             system_prompt_content = "あなたは優秀なエージェントです。謙虚に振る舞いユーザーと簡潔に対話を行います。markdown形式で回答してください"
+
+        if MEMORY_FEATURE_ENABLED:
+            recent_memories = get_recent_memories(thread_ts)
+            if recent_memories:
+                memory_header = "\n\n## Context from Past Conversations (Summaries):\n"
+                formatted_memories = "\n".join([f"- {mem}" for mem in recent_memories])
+                system_prompt_content += memory_header + formatted_memories
+                print(f"System prompt for thread {thread_ts} now includes {len(recent_memories)} memories.")
+
         _messages[thread_ts].append(
             Message(role=UserRole.system, content=system_prompt_content),
         )
@@ -211,6 +278,30 @@ async def handle_app_mention(body, say, ack):
     
     # Append the final assistant message (either from the first or second call)
     _messages[thread_ts].append(Message(role=UserRole.assistant, content=assistant_message_content))
+
+    if MEMORY_FEATURE_ENABLED:
+        user_messages = [m for m in _messages[thread_ts] if m.role == UserRole.user]
+        last_user_message_content = user_messages[-1].content if user_messages else ""
+
+        if last_user_message_content: # Proceed only if there's a user message to summarize
+            summarization_prompt_content = f"concisely summarize the following interaction in one or two sentences, focusing on key information exchanged and insights gained. User: {last_user_message_content} Assistant: {assistant_message_content}"
+            summarization_messages = [{"role": "user", "content": summarization_prompt_content}]
+            # Optional: Add a system prompt for better summarization
+            # summarization_messages.insert(0, {"role": "system", "content": "You are a summarization expert."})
+
+            try:
+                summary_res = await client.chat(
+                    model="llama4_128k:latest", # Or your preferred model
+                    messages=summarization_messages
+                )
+                interaction_summary = summary_res.message.get('content', '').strip()
+                if interaction_summary:
+                    add_memory(thread_ts, interaction_summary)
+                else:
+                    print(f"Summarization result was empty for thread {thread_ts}")
+            except Exception as e:
+                print(f"Error during summarization call for thread {thread_ts}: {e}")
+
     await send(say, assistant_message_content, thread_ts)
 
 
@@ -230,6 +321,7 @@ async def warm_up():
 
 
 if __name__ == "__main__":
+    init_db()
     handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"], loop=asyncio.get_event_loop())
     asyncio.get_event_loop().run_until_complete(warm_up())
     asyncio.get_event_loop().run_until_complete(handler.start_async())
