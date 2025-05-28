@@ -3,6 +3,7 @@ import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from ollama import Image # Import the actual Image type
 # Assuming main.py is in the same directory or accessible via PYTHONPATH
 from main import (
     extract_python_code,
@@ -153,7 +154,7 @@ class TestMainFunctions(unittest.IsolatedAsyncioTestCase):
         
         self.assertEqual(_messages[thread_ts][0].role, UserRole.system)
         self.assertEqual(_messages[thread_ts][1].role, UserRole.user)
-        self.assertEqual(_messages[thread_ts][1].content, "Calculate 10+5")
+        self.assertEqual(_messages[thread_ts][1].content, "Calculate 10+5 (single)") # Corrected assertion
         
         self.assertEqual(_messages[thread_ts][2].role, UserRole.assistant)
         self.assertEqual(_messages[thread_ts][2].content, "Let me calculate that: ```python\nprint(10+5)\n```")
@@ -377,8 +378,9 @@ class TestMainFunctions(unittest.IsolatedAsyncioTestCase):
         
         # Mock download_and_encode_images because this flow will call it
         # Let's say it successfully "downloads" and "encodes" one image
-        mock_encoded_image = MagicMock(spec_set=['value']) # Mocking the Image pydantic model structure
-        mock_encoded_image.value = b"fake_image_bytes"
+        # Use the actual ollama.Image type for the mock to pass Pydantic validation.
+        # The `value` attribute of ollama.Image is bytes.
+        mock_encoded_image = Image(value=b"fake_image_bytes")
 
         with patch('main.download_and_encode_images', new_callable=AsyncMock, return_value=[mock_encoded_image]) as mock_download:
             # We also need to mock app.client.token which is used by download_and_encode_images

@@ -7,7 +7,7 @@ import io
 import sys
 import traceback
 import asyncio
-import re
+import re # Added for code extraction
 from ollama import AsyncClient, Image
 from collections import defaultdict
 import aiohttp
@@ -47,8 +47,6 @@ def execute_python_code(code_string: str) -> dict:
     sys.stderr = stderr_capture
     
     try:
-        print("Executing code:")
-        print(code_string)
         exec(code_string)
         stdout_result = stdout_capture.getvalue()
         stderr_result = stderr_capture.getvalue()
@@ -150,11 +148,7 @@ async def handle_app_mention(body, say, ack):
         if is_recipe_request:
             system_prompt_content = "あなたはレシピ提案のエキスパートです。提供された食材の画像に基づいて、ユーザーが作れる料理のレシピ案を3つ考えてください。材料と分量だけを明確に、markdown形式で提示してください。"
         else:
-            system_prompt_content = (
-                "あなたは優秀なエージェントです。謙虚に振る舞いユーザーと簡潔に対話を行います。markdown形式で回答してください\n"
-                "pythonコードを含む場合は、コードブロックを使用して、実行可能なコードを提供してください。\n"
-                "例: ```python\nprint('Hello, World!')\n```\n"
-            )
+            system_prompt_content = "あなたは優秀なエージェントです。謙虚に振る舞いユーザーと簡潔に対話を行います。markdown形式で回答してください"
         _messages[thread_ts].append(
             Message(role=UserRole.system, content=system_prompt_content),
         )
@@ -165,39 +159,54 @@ async def handle_app_mention(body, say, ack):
     
     _messages[thread_ts].append(Message(role=UserRole.user, content=user_message, images=base64_images if base64_images else None))
     
+    # Convert Message objects to dictionaries for Ollama client
+    # The ollama client expects a list of dicts.
+    # If Message Pydantic models are passed directly, the ollama library handles serialisation.
+    # Let's ensure this by passing the list of Message objects directly.
+    
     ollama_messages_for_first_call = []
     for msg in _messages[thread_ts]:
         msg_dict = {"role": msg.role.value, "content": msg.content}
-        if msg.images:
+        if msg.images: # Only include images if present
             msg_dict["images"] = msg.images
         ollama_messages_for_first_call.append(msg_dict)
 
     res = await client.chat(
-        model="llama4_128k:latest",
-        messages=ollama_messages_for_first_call
+        model="llama4:maverick", # Or your preferred model
+        messages=ollama_messages_for_first_call # Pass the list of dicts
     )
-    assistant_message_content = res.message.get('content', '').split('</think>')[-1]
+    assistant_message_content = res.message.get('content', '').split('</think>')[-1] # Ensure content key exists
 
-    codes_to_execute = extract_python_code(assistant_message_content)
-    if codes_to_execute:
+    # Attempt to extract python code from the assistant's message
+    codes_to_execute = extract_python_code(assistant_message_content) # Now a list
+
+    if codes_to_execute: # Check if the list is not empty
+        # Store the original assistant message that contained the code blocks
         _messages[thread_ts].append(Message(role=UserRole.assistant, content=assistant_message_content))
 
+        # Loop through each extracted code string and process it
         for code_string in codes_to_execute:
             execution_result = execute_python_code(code_string)
             tool_message_content = json.dumps(execution_result)
             _messages[thread_ts].append(Message(role=UserRole.tool, content=tool_message_content))
 
+        # Prepare messages for the second Ollama call, after all tool messages are added
         ollama_messages_for_second_call = []
         for msg in _messages[thread_ts]:
             msg_dict = {"role": msg.role.value, "content": msg.content}
+            # Images are not typically sent with tool responses or subsequent system messages
+            # if msg.images: 
+            #     msg_dict["images"] = msg.images
             ollama_messages_for_second_call.append(msg_dict)
         
+        # Call Ollama again with the tool's output
         res = await client.chat(
-            model="llama4_128k:latest",
+            model="llama4:maverick",
             messages=ollama_messages_for_second_call
         )
         assistant_message_content = res.message.get('content', '').split('</think>')[-1]
     
+    # Append the final assistant message (either from the first or second call)
     _messages[thread_ts].append(Message(role=UserRole.assistant, content=assistant_message_content))
     await send(say, assistant_message_content, thread_ts)
 
