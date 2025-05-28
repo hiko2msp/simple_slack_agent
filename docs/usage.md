@@ -42,11 +42,11 @@ The bot listens for messages in channels it has been added to and in direct mess
 ## Conversation Memory Feature (Optional)
 
 This bot includes an optional conversation memory feature. If enabled by the administrator (using the `MEMORY_FEATURE_ENABLED` environment variable), the bot will:
-1.  Summarize the key points of your interaction with it at the end of each exchange within a Slack thread.
-2.  Store this summary locally in a shared database. If a summary for that specific Slack thread already exists, it will be overwritten with this latest summary. This means only the most recent summary for any given thread is retained.
-3.  When you start a new conversation, the bot will load a selection of the most recent summaries from this global pool (featuring the latest updates from various threads). This helps the bot maintain context over longer periods or across sessions by providing it with a "memory" of what was previously discussed globally, consisting of the latest summary from various threads.
+1.  Generate a 'meeting minutes' style summary of the entire interaction history within the current Slack thread at the end of the exchange, focusing on key topics and outcomes without speaker attribution.
+2.  Store this comprehensive summary locally in a shared database. If a summary for that specific Slack thread already exists, it will be overwritten with this latest comprehensive summary. This means only the most recent summary for any given thread is retained.
+3.  When you start a new conversation, the bot will load a selection of the most recent comprehensive summaries from this global pool (featuring the latest updates from various threads). This helps the bot maintain context over longer periods or across sessions by providing it with a "memory" of what was previously discussed globally, consisting of the latest summary from various threads.
 
-The memory is accessed globally, but storage is such that each thread only keeps its single, most up-to-date summary in the global pool.
+The memory is accessed globally, but storage is such that each thread only keeps its single, most up-to-date comprehensive summary in the global pool.
 
 ## Example Interaction
 

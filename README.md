@@ -8,7 +8,7 @@ This project is a Slack bot that interacts with an Ollama-based Large Language M
 - Maintains a separate conversation history for each thread.
 - Interacts with a configurable Ollama model.
 - Responds in markdown format.
-- **Conversation Memory (Optional):** When enabled via the `MEMORY_FEATURE_ENABLED` environment variable, the bot summarizes interactions. These summaries are stored globally, with each conversation thread keeping only its latest summary (updated upon new activity in the thread). These global summaries are then used as context for new interactions.
+- **Conversation Memory (Optional):** When enabled via the `MEMORY_FEATURE_ENABLED` environment variable, the bot generates a 'meeting minutes' style summary of the entire conversation within a thread. These comprehensive summaries are stored globally, with each conversation thread keeping only its latest summary (updated upon new activity in the thread). These global summaries are then used as context for new interactions.
 
 ## Prerequisites
 - Python 3.13 or higher
@@ -68,7 +68,7 @@ The application is configured through environment variables:
 -   `SLACK_ACCESS_TOKEN`: (Required) Your Slack app's Bot User OAuth Token.
 -   `SLACK_APP_TOKEN`: (Required) Your Slack app's App-Level Token for Socket Mode.
 -   `OLLAMA_HOST`: (Required) The URL of your Ollama instance.
--   `MEMORY_FEATURE_ENABLED`: (Optional) Set to `true` to enable the conversation memory feature. Defaults to `false`. When enabled, the bot will summarize interactions. Each conversation thread's latest summary is stored and updated in a global database. The bot then recalls a selection of recent global summaries from this database to provide context for new interactions.
+-   `MEMORY_FEATURE_ENABLED`: (Optional) Set to `true` to enable the conversation memory feature. Defaults to `false`. When enabled, the bot generates a 'meeting minutes' style summary of the entire conversation within a thread. Each conversation thread's latest comprehensive summary is stored and updated in a global database. The bot then recalls a selection of recent global summaries from this database to provide context for new interactions.
 -   **Default Ollama Model**: The bot currently uses the `llama4:maverick` model by default. This is hardcoded in `main.py`.
 
 ## Viewing Conversation Memories

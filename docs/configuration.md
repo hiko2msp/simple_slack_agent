@@ -25,7 +25,7 @@ The following environment variables are required:
     -   **Source:** This depends on where your Ollama service is hosted.
 
 -   `MEMORY_FEATURE_ENABLED`:
-    -   **Description:** Set to `true` to enable the conversation memory feature. If not set, it defaults to `false`. When enabled, the bot will store summaries of interactions in a local `memory.db` file, where each thread's latest summary is kept and updated (overwritten on new interactions in the same thread). It uses the most recent summaries from this global pool (i.e., the latest summaries from various threads) to provide context for new interactions.
+    -   **Description:** Set to `true` to enable the conversation memory feature. If not set, it defaults to `false`. When enabled, the bot will generate a comprehensive 'meeting minutes' style summary of the entire conversation history within a thread. This summary is stored in a local `memory.db` file, where each thread's latest summary is kept and updated (overwritten on new interactions in the same thread). It uses the most recent summaries from this global pool (i.e., the latest comprehensive summaries from various threads) to provide context for new interactions.
     -   **Example:** `MEMORY_FEATURE_ENABLED=true`
     -   **Default:** `false`
 

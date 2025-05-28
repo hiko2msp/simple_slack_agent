@@ -296,14 +296,36 @@ async def handle_app_mention(body, say, ack):
     _messages[thread_ts].append(Message(role=UserRole.assistant, content=assistant_message_content))
 
     if MEMORY_FEATURE_ENABLED:
-        user_messages = [m for m in _messages[thread_ts] if m.role == UserRole.user]
-        last_user_message_content = user_messages[-1].content if user_messages else ""
+        summarization_history_parts = []
+        # _messages[thread_ts] already contains the history up to the point *before* the current assistant's response is added.
+        # The current assistant's response (assistant_message_content) also needs to be included.
 
-        if last_user_message_content: # Proceed only if there's a user message to summarize
-            summarization_prompt_content = f"concisely summarize the following interaction in one or two sentences, focusing on key information exchanged and insights gained. User: {last_user_message_content} Assistant: {assistant_message_content}"
+        temp_history_for_summarization = list(_messages[thread_ts]) # Make a copy
+        # Add the latest assistant message to this temporary history for summarization
+        temp_history_for_summarization.append(Message(role=UserRole.assistant, content=assistant_message_content))
+
+        for msg in temp_history_for_summarization:
+            if msg.role == UserRole.system: # Skip system messages for the summarization input
+                continue
+            # For tool messages, we might want to indicate the output clearly.
+            # For user/assistant, just their content.
+            if msg.role == UserRole.tool:
+                summarization_history_parts.append(f"Tool Output: {msg.content}")
+            else: # User and Assistant messages
+                summarization_history_parts.append(f"{msg.role.value.capitalize()}: {msg.content}")
+                
+        full_conversation_history_text = "\n".join(summarization_history_parts)
+
+        if full_conversation_history_text: # Proceed only if there's something to summarize
+            summarization_prompt_content = (
+                "You are a minute-taking assistant. Based on the following conversation history, "
+                "create a concise summary or overview of the discussion. "
+                "Do not include who said what (no speaker attribution). "
+                "Focus on the key topics, decisions, and outcomes discussed.\n\n"
+                "Conversation History:\n"
+                f"{full_conversation_history_text}"
+            )
             summarization_messages = [{"role": "user", "content": summarization_prompt_content}]
-            # Optional: Add a system prompt for better summarization
-            # summarization_messages.insert(0, {"role": "system", "content": "You are a summarization expert."})
 
             try:
                 summary_res = await client.chat(
@@ -312,7 +334,7 @@ async def handle_app_mention(body, say, ack):
                 )
                 interaction_summary = summary_res.message.get('content', '').strip()
                 if interaction_summary:
-                    add_memory(thread_ts, interaction_summary)
+                    add_memory(thread_ts, interaction_summary) # thread_ts is still key for storage
                 else:
                     print(f"Summarization result was empty for thread {thread_ts}")
             except Exception as e:
