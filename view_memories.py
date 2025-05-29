@@ -34,8 +34,6 @@ def view_memories():
 
             # For display, limit summary length and replace newlines
             display_summary = summary.replace('\n', ' ').replace('\r', '')
-            if len(display_summary) > 100:
-                display_summary = display_summary[:97] + "..."
             
             print(f"{formatted_timestamp:<25} {thread_ts:<25} {display_summary}")
         
