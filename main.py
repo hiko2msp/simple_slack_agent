@@ -22,6 +22,24 @@ DB_PATH = "memory.db"
 MEMORY_FEATURE_ENABLED = os.getenv("MEMORY_FEATURE_ENABLED", "false").lower() == "true"
 
 
+# Define Pydantic model for system prompt rules
+class SystemPromptRule(BaseModel):
+    condition: str
+    prompt_template: str
+
+# Initialize global variable for system prompt rules
+SYSTEM_PROMPT_RULES: list[SystemPromptRule] = [
+    SystemPromptRule(
+        condition="レシピ",
+        prompt_template="あなたはレシピ提案のエキスパートです。提供された食材の画像に基づいて、ユーザーが作れる料理のレシピ案を3つ考えてください。材料と分量だけを明確に、markdown形式で提示してください。"
+    ),
+    SystemPromptRule(
+        condition="", # Default Fallback Rule
+        prompt_template="あなたは優秀なエージェントです。謙虚に振る舞いユーザーと簡潔に対話を行います。markdown形式で回答してください"
+    )
+]
+
+
 client = AsyncClient(
     host=os.environ["OLLAMA_HOST"],
 )
@@ -131,21 +149,79 @@ def get_recent_memories(limit: int = 5) -> list[str]: # New signature
             con.close()
     return memories
 
-def _construct_initial_system_prompt(thread_ts: str, base_prompt: str, is_recipe: bool) -> str:
-    # Determine the correct base prompt based on is_recipe
-    if is_recipe:
-        system_prompt_content = "あなたはレシピ提案のエキスパートです。提供された食材の画像に基づいて、ユーザーが作れる料理のレシピ案を3つ考えてください。材料と分量だけを明確に、markdown形式で提示してください。"
-    else:
-        system_prompt_content = base_prompt
+def _construct_initial_system_prompt(thread_ts: str, user_message: str) -> str:
+    system_prompt_content = ""
+    default_prompt_template = "" # Initialize default_prompt_template
+
+    for rule in SYSTEM_PROMPT_RULES:
+        if not rule.condition: # Check if condition is empty for default rule
+            default_prompt_template = rule.prompt_template
+        elif rule.condition in user_message:
+            system_prompt_content = rule.prompt_template
+            break # First match wins
+
+    if not system_prompt_content: # If no specific rule matched
+        if default_prompt_template: # Check if a default was found
+            system_prompt_content = default_prompt_template
+        else:
+            # Fallback if SYSTEM_PROMPT_RULES is empty or has no default rule
+            # This case should ideally be avoided by ensuring SYSTEM_PROMPT_RULES is well-defined
+            system_prompt_content = "あなたは一般的なアシスタントです。ユーザーの質問に答えてください。"
+            print(f"Warning: No matching system prompt rule found for user message and no default rule set. Using a generic default.")
 
     if MEMORY_FEATURE_ENABLED:
-        recent_memories = get_recent_memories() # Removed thread_ts
+        recent_memories = get_recent_memories()
         if recent_memories:
             memory_header = "\n\n## Reference from Past Conversations (Summaries) - Use these lightly for context if relevant:\n"
             formatted_memories = "\n".join([f"- {mem}" for mem in recent_memories])
             system_prompt_content += memory_header + formatted_memories
             print(f"System prompt for thread {thread_ts} now includes {len(recent_memories)} memories.")
     return system_prompt_content
+
+# Function to manage system prompt rules
+def manage_system_prompt_rules(user_message: str) -> str:
+    global SYSTEM_PROMPT_RULES # Required to modify the global list
+
+    # Regex to parse the user message
+    # Expected format: "システムプロンプト: 条件=<keyword>, プロンプト=<prompt_text>"
+    # Using re.DOTALL so that . matches newlines in prompt_text
+    match = re.match(r"システムプロンプト:\s*条件=(.+?),\s*プロンプト=(.+)", user_message, re.DOTALL)
+
+    if not match:
+        return "無効なルール形式です。期待される形式: 「システムプロンプト: 条件=キーワード, プロンプト=プロンプトテキスト」"
+
+    condition = match.group(1).strip()
+    prompt_text = match.group(2).strip()
+
+    if not condition or not prompt_text: # Should not happen if regex matches and groups are non-empty
+        return "無効なルール形式です。条件とプロンプトの両方が必要です。"
+
+    # Check if a rule with this condition already exists
+    for rule in SYSTEM_PROMPT_RULES:
+        if rule.condition == condition:
+            rule.prompt_template = prompt_text
+            return f"システムプロンプトのルールを更新しました。条件: '{condition}'"
+
+    # If no rule with the condition exists, create a new one
+    new_rule = SystemPromptRule(condition=condition, prompt_template=prompt_text)
+
+    # Add the new rule before the default rule (empty condition string)
+    default_rule_index = -1
+    for i, rule in enumerate(SYSTEM_PROMPT_RULES):
+        if rule.condition == "":
+            default_rule_index = i
+            break
+
+    if default_rule_index != -1:
+        SYSTEM_PROMPT_RULES.insert(default_rule_index, new_rule)
+    else:
+        # Fallback: if no default rule is found (should not happen with current setup),
+        # append to the end. This ensures the rule is added.
+        SYSTEM_PROMPT_RULES.append(new_rule)
+        print("Warning: Default system prompt rule not found. New rule appended to the end.")
+
+    return f"新しいシステムプロンプトのルールを作成しました。条件: '{condition}'"
+
 
 def extract_python_code(text: str) -> list[str]:
     """
@@ -226,18 +302,29 @@ async def handle_app_mention(body, say, ack):
     thread_ts = body["event"].get("thread_ts", body["event"]["ts"])
     # channel_id = body["event"]["channel"] # Useful for potential logging or context
 
-    is_recipe_request = "レシピ" in user_message
+    # --- START NEW INTEGRATION ---
+    if user_message.startswith("システムプロンプト:"):
+        response_message = manage_system_prompt_rules(user_message)
+        await send(say, response_message, thread_ts)
+        return
+    # --- END NEW INTEGRATION ---
+
+    # is_recipe_request is no longer needed here for system prompt construction,
+    # but it's used below for image handling.
+    # base_system_prompt is also no longer needed here.
 
     if not _messages.get(thread_ts):
-        base_system_prompt = "あなたは優秀なエージェントです。謙虚に振る舞いユーザーと簡潔に対話を行います。markdown形式で回答してください"
-        # is_recipe_request is already defined
-        final_system_prompt = _construct_initial_system_prompt(thread_ts, base_system_prompt, is_recipe_request)
+        # Construct system prompt based on user message using the new rule-based function
+        final_system_prompt = _construct_initial_system_prompt(thread_ts, user_message)
         _messages[thread_ts].append(
             Message(role=UserRole.system, content=final_system_prompt)
         )
 
     base64_images = []
-    if is_recipe_request and body["event"].get("files"):
+    # Check for "レシピ" in user_message to decide on image download,
+    # This logic might need to be more flexible if other rules need images.
+    # For now, keeping it tied to "レシピ" as per original logic for image handling.
+    if "レシピ" in user_message and body["event"].get("files"):
         base64_images = await download_and_encode_images(body["event"]["files"], app.client.token)
     
     _messages[thread_ts].append(Message(role=UserRole.user, content=user_message, images=base64_images if base64_images else None))
