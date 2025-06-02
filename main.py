@@ -18,6 +18,7 @@ import time
 
 load_dotenv()
 
+MODEL = "qwen3:32b"  # Default model, can be overridden by environment variable
 DB_PATH = "memory.db"
 MEMORY_FEATURE_ENABLED = os.getenv("MEMORY_FEATURE_ENABLED", "false").lower() == "true"
 
@@ -321,10 +322,7 @@ async def handle_app_mention(body, say, ack):
         )
 
     base64_images = []
-    # Check for "レシピ" in user_message to decide on image download,
-    # This logic might need to be more flexible if other rules need images.
-    # For now, keeping it tied to "レシピ" as per original logic for image handling.
-    if "レシピ" in user_message and body["event"].get("files"):
+    if body["event"].get("files"):
         base64_images = await download_and_encode_images(body["event"]["files"], app.client.token)
     
     _messages[thread_ts].append(Message(role=UserRole.user, content=user_message, images=base64_images if base64_images else None))
@@ -342,7 +340,7 @@ async def handle_app_mention(body, say, ack):
         ollama_messages_for_first_call.append(msg_dict)
 
     res = await client.chat(
-        model="llama4_128k:latest", # Or your preferred model
+        model=MODEL, # Or your preferred model
         messages=ollama_messages_for_first_call # Pass the list of dicts
     )
     assistant_message_content = res.message.get('content', '').split('</think>')[-1] # Ensure content key exists
@@ -374,7 +372,7 @@ async def handle_app_mention(body, say, ack):
         
         # Call Ollama again with the tool's output
         res = await client.chat(
-            model="llama4_128k:latest",
+            model=MODEL,
             messages=ollama_messages_for_second_call
         )
         assistant_message_content = res.message.get('content', '').split('</think>')[-1]
@@ -416,7 +414,7 @@ async def handle_app_mention(body, say, ack):
 
             try:
                 summary_res = await client.chat(
-                    model="llama4_128k:latest", # Or your preferred model
+                    model=MODEL, # Or your preferred model
                     messages=summarization_messages
                 )
                 interaction_summary = summary_res.message.get('content', '').strip()
@@ -437,7 +435,7 @@ async def warm_up():
     """
     try:
         await client.chat(
-            model="llama4_128k:latest",
+            model=MODEL,
             messages=[{"role": "system", "content": "Warm up the model."}]
         )
         print("Ollama client warmed up successfully.")
