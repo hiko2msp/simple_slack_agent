@@ -436,7 +436,7 @@ async def warm_up():
     try:
         await client.chat(
             model=MODEL,
-            messages=[{"role": "system", "content": "Warm up the model."}]
+            messages=[]
         )
         print("Ollama client warmed up successfully.")
     except Exception as e:
