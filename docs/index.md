@@ -7,3 +7,4 @@ This project is a Slack bot that interacts with an Ollama-based Large Language M
 - [Setup](setup.md)
 - [Usage](usage.md)
 - [Configuration](configuration.md)
+- [Search Agent](search_agent.md)

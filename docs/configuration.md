@@ -65,6 +65,19 @@ The system prompt is a set of initial instructions given to the LLM to define it
     ```
 -   **Changing the System Prompt:** You can modify the string content of this `Message` to change the bot's default behavior, tone, or instructions. For example, you could instruct it to always respond in a specific language, adopt a particular character, or focus on certain types of information.
 
+## Search Agent Configuration
+
+The Search Agent, which runs as a separate application, has its own specific configuration requirements.
+
+-   **Google API Credentials:**
+    -   The Search Agent requires `GOOGLE_API_KEY` and `GOOGLE_SEARCH_ENGINE_ID` for its web search functionality. These should be set in your `.env` file.
+    -   For detailed information on these variables and Search Agent setup, please refer to the [Search Agent documentation](search_agent.md#setup-and-configuration).
+
+-   **Ollama Host for Search Agent:**
+    -   It's important to note that the Search Agent uses a **different Ollama instance configuration** than the main Slack bot.
+    -   By default, the Search Agent is hardcoded to connect to Ollama at `http://localhost:12345` (as specified in `agents/search_agent/search_agent.py`).
+    -   This is independent of the `OLLAMA_HOST` environment variable (e.g., `http://localhost:11434`) used by the main Slack bot. Ensure the correct Ollama instance is running and accessible for the Search Agent if you intend to use it.
+
 ---
 
 By adjusting these configurations, you can tailor the Simple Slack Agent to better suit your needs and preferences. Remember to restart the bot application after making any changes to the `.env` file or `main.py`.
