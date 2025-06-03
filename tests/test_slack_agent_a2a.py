@@ -57,11 +57,11 @@ async def test_slack_agent_enter_search_mode(mock_a2a_client_class, mock_send_fu
 
     mock_say = AsyncMock()
     mock_ack = AsyncMock()
-    
+
     event_body = mock_slack_event_body("/search", thread_ts="t_search_enter")
-    
+
     await handle_app_mention(body=event_body, say=mock_say, ack=mock_ack)
-    
+
     mock_ack.assert_called_once()
     mock_send_func.assert_called_once_with(mock_say, "Entered search mode. Send your queries. Type '/search_exit' to leave.", "t_search_enter")
     assert mock_slack_agent_globals["t_search_enter"] is True # Check state was set
@@ -74,13 +74,13 @@ async def test_slack_agent_exit_search_mode(mock_a2a_client_class, mock_send_fun
 
     mock_say = AsyncMock()
     mock_ack = AsyncMock()
-    
+
     # Enter search mode first
     mock_slack_agent_globals["t_search_exit"] = True
-    
+
     event_body = mock_slack_event_body("/search_exit", thread_ts="t_search_exit")
     await handle_app_mention(body=event_body, say=mock_say, ack=mock_ack)
-    
+
     mock_ack.assert_called_once()
     mock_send_func.assert_called_once_with(mock_say, "Exited search mode.", "t_search_exit")
     assert mock_slack_agent_globals["t_search_exit"] is False
@@ -90,7 +90,7 @@ async def test_slack_agent_exit_search_mode(mock_a2a_client_class, mock_send_fun
 @patch(f"{slack_main_path}.A2AClient") # Mock the A2AClient class itself
 async def test_slack_agent_perform_search_a2a_call_success(mock_a2a_client_class, mock_send_func, mock_slack_event_body, mock_slack_agent_globals):
     from agents.slack_agent.main import handle_app_mention
-    
+
     # Configure the mock A2AClient instance that will be created
     mock_a2a_client_instance = AsyncMock()
     mock_a2a_client_instance.call_method.return_value = "Test search result" # Simulate successful string response
@@ -98,23 +98,23 @@ async def test_slack_agent_perform_search_a2a_call_success(mock_a2a_client_class
 
     mock_say = AsyncMock()
     mock_ack = AsyncMock()
-    
+
     thread_id = "t_search_do"
     mock_slack_agent_globals[thread_id] = True # Set to search mode
 
     query = "what is A2A?"
     event_body = mock_slack_event_body(query, thread_ts=thread_id)
-    
+
     await handle_app_mention(body=event_body, say=mock_say, ack=mock_ack)
-    
+
     mock_ack.assert_called_once()
-    
+
     # Check A2AClient instantiation and calls
     mock_a2a_client_class.assert_called_once_with(remote_host="testhost", remote_port=1234)
     mock_a2a_client_instance.connect.assert_called_once()
     mock_a2a_client_instance.call_method.assert_called_once_with("handle_search", query=query)
     mock_a2a_client_instance.disconnect.assert_called_once()
-    
+
     # Check that search result is sent to Slack
     mock_send_func.assert_called_once_with(mock_say, f"Search results:\nTest search result", thread_id)
 
@@ -133,19 +133,19 @@ async def test_slack_agent_perform_search_a2a_call_failure(mock_a2a_client_class
 
     thread_id = "t_search_fail"
     mock_slack_agent_globals[thread_id] = True # Set to search mode
-    
+
     query = "search that fails"
     event_body = mock_slack_event_body(query, thread_ts=thread_id)
 
     await handle_app_mention(body=event_body, say=mock_say, ack=mock_ack)
-    
+
     mock_ack.assert_called_once()
     mock_a2a_client_class.assert_called_once_with(remote_host="testhost", remote_port=1234)
     mock_a2a_client_instance.connect.assert_called_once()
     mock_a2a_client_instance.call_method.assert_called_once_with("handle_search", query=query)
     # disconnect should still be called in finally block
-    mock_a2a_client_instance.disconnect.assert_called_once() 
-    
+    mock_a2a_client_instance.disconnect.assert_called_once()
+
     mock_send_func.assert_called_once_with(mock_say, "Error communicating with search agent: A2A connection error", thread_id)
 
 # Note: For these tests to run, you might need to:

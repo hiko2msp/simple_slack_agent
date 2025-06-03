@@ -74,13 +74,32 @@ The Search Agent now primarily runs as an A2A server, making its search capabili
 ## How it Works (A2A Server Mode)
 
 -   **A2A Server Initialization (`main` function):**
-    *   The `main` function in `agents/search_agent/search_agent.py` now initializes and starts the `A2AServer`.
-    *   It sets up the `SearchServiceAgent` instance, passing it the Ollama client and the initialized Playwright browser.
--   **`SearchServiceAgent(Agent)`:**
-    *   This class, derived from the A2A SDK's `Agent` class, defines the server-side agent logic.
-    *   Its `__init__` method initializes a `ToolCaller` instance. Note that the `messenger` component of `ToolCaller` is set to `None`, as direct user interaction (like `ask_to_user`) is not expected in this A2A service mode.
-    *   The key method is `async def handle_search(self, query: str) -> str`. This method is exposed via the A2A server. When called, it uses the `search` function from its `ToolCaller`'s available functions to perform the search using the provided `query`. The original `search` tool expects `augmented_query1` and `augmented_query2`; in the `handle_search` adapter, the main `query` is currently passed for these as well for simplicity.
--   **Tool Usage (`ToolCaller`):**
-    *   The `ToolCaller` remains responsible for managing and executing the actual search tools (`search`, `infer_knowledge_by_url`).
-    *   The `search` tool utilizes `batch_search` (Google Custom Search API) and `get_content` (Playwright for fetching URLs from search results if needed, though `handle_search` primarily returns raw search results).
--   **No Direct User Interaction Loop:** Unlike its previous standalone version, the A2A server mode does not involve a direct console-based interaction loop for tasks, tool selection by an LLM for general purposes, or user prompts via `ask_to_user`. Its interaction is now solely based on handling A2A requests for the `handle_search` method.
+    *   The `main` function in `agents/search_agent/search_agent.py` initializes and starts the `A2AServer`.
+    *   It creates an instance of `SearchServiceAgent`, providing it with the Ollama client and the shared Playwright browser instance.
+
+-   **`SearchServiceAgent(Agent)` - Request Handling:**
+    *   This class (derived from `a2a.agent.Agent`) is the core of the A2A service.
+    *   Its `__init__` method stores the Ollama client and browser. `ToolCaller` is not created here.
+    *   The key method `async def handle_search(self, query: str) -> str` is invoked for each incoming A2A request.
+    *   Inside `handle_search`:
+        1.  An `A2AMessenger` instance is created specifically for this request. This messenger will capture the final output of the agent's processing.
+        2.  A `ToolCaller` instance is created, equipped with the Ollama client, the Playwright browser, and the dedicated `A2AMessenger`.
+        3.  An `AgentLocalState` is prepared: the system prompt is initialized, and the incoming `query` is added as the first user message and set as the `current_task`.
+
+-   **Task Processing (`agent_process_single_task`):**
+    *   The `handle_search` method then calls the `async def agent_process_single_task(current_task_state, tool_caller)` function.
+    *   This function contains the agent's main execution loop:
+        *   It iteratively calls `tool_caller.action(current_task_state)`.
+        *   In each iteration, `tool_caller.action` uses the LLM (`select_tool`) to decide the next step, which might involve using one of the available tools (e.g., `search`, `infer_knowledge_by_url`, `read_file`, etc.) or formulating a response.
+        *   The agent can use its full reasoning capabilities and any of its tools across multiple iterations to best answer the `query`. For example, it might perform a search, then read a resulting URL for more details, and then summarize this information.
+        *   The loop continues until the task is marked `done` (typically by the `complete` tool) or a maximum number of iterations is reached.
+        *   The `ask_to_user` tool is not suitable for A2A mode, as it would block indefinitely; if invoked, the loop should terminate with an error.
+
+-   **Response Generation via `A2AMessenger`:**
+    *   When the agent decides the task is complete, it uses the `complete(message: str)` tool.
+    *   The `complete` tool (now asynchronous) calls `await self.messenger.send(message)`, where `self.messenger` is the `A2AMessenger` instance.
+    *   The `A2AMessenger` stores this message as the `final_response` and sets its `response_ready` flag.
+    *   After `agent_process_single_task` finishes, `handle_search` retrieves this `final_response` from the `A2AMessenger` and returns it as the string result of the A2A call.
+    *   If the loop finishes without a response being set in the messenger (e.g., timeout or blocked by `ask_to_user`), `handle_search` returns an appropriate error message.
+
+This architecture allows the `search_agent` to leverage its full LLM-driven, tool-using capabilities to respond to A2A requests, rather than just executing a single predefined function. It processes each query as a mini-task for the agent to solve.

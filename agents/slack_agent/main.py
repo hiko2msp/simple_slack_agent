@@ -328,7 +328,7 @@ async def handle_app_mention(body, say, ack):
             print(f"Search mode active for {thread_ts}. Query: {user_message}. Contacting A2A server at {SEARCH_AGENT_A2A_HOST}:{SEARCH_AGENT_A2A_PORT}")
             await client_a2a.connect()
             response_data = await client_a2a.call_method("handle_search", query=user_message)
-            
+
             if isinstance(response_data, A2AMessage):
                 search_result = response_data.content
             elif isinstance(response_data, str):

@@ -30,6 +30,37 @@ class Messenger(ABC):
         return self._thread_ts
 
 
+class A2AMessenger(Messenger):
+    def __init__(self, thread_ts: str = "a2a_thread"): # thread_ts might be less relevant for A2A direct responses
+        super().__init__(thread_ts)
+        self.final_response: str | None = None
+        self.response_ready: bool = False
+
+    async def send(self, message: str) -> None:
+        # This send is called by tools like 'complete' or 'report_to_user'.
+        # For A2A, the message from 'complete' tool is the critical one.
+        # If other tools use 'send', their messages might be ignored or logged.
+        # We are primarily interested in the message from the 'complete' tool.
+        # A simple approach: the last message sent, especially if it ends with
+        # a specific marker from the 'complete' tool, is the final response.
+        # Or, the 'complete' tool itself will call this, and that's our signal.
+
+        print(f"A2AMessenger received message: {message}")
+        # For now, let's assume any message sent to this messenger could be a candidate
+        # for the final response. The logic in 'complete' tool will be key.
+        # If 'complete' calls this, it means this is the final message.
+        self.final_response = message
+        self.response_ready = True
+        # In a more complex scenario, we might check if the message comes from
+        # the 'complete' tool specifically.
+
+    def get_final_response(self) -> str | None:
+        return self.final_response
+
+    def is_response_ready(self) -> bool:
+        return self.response_ready
+
+
 SYSTEM_PROMPT = """
 You are Taro, a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices.
 
@@ -104,69 +135,93 @@ class Message(BaseModel):
     def __str__(self):
         return f"{self.role}: {self.content}"
 
-# Agent state management
-class AgentState:
-    def __init__(self):
-        self.running = True
-        self.busy_with_user = True
-        self.last_user_interaction = None
-        self.messenger = None
-
-    def set_messenger(self, messenger: Messenger):
-        self.messenger = messenger
+# Agent state management (AgentState class removed)
 
 class AgentLocalState(BaseModel):
     messages: List[Message] = []
     current_task: str = ""
 
 
-# agent_state = AgentState()
+# agent_state = AgentState() # Removed
 
-# async def agent_main_loop():
+# async def agent_main_loop(): # Commented out / To be removed
 #     await initialize_browser()
 #     if not _browser:
 #         print("Failed to initialize browser. Agent loop cannot start.")
 #         return
 #     local_state = AgentLocalState(messages=Message.init(), current_task="")
 #     try:
-#         while agent_state.running:
-#             tool_caller = ToolCaller(client, agent_state.messenger, _browser)
-#             if agent_state.busy_with_user:
+#         while agent_state.running: # agent_state would be undefined
+#             tool_caller = ToolCaller(client, agent_state.messenger, _browser) # agent_state would be undefined
+#             if agent_state.busy_with_user: # agent_state would be undefined
 #                 await asyncio.sleep(3)
 #                 continue
-# 
-#             if agent_state.last_user_interaction:
+#
+#             if agent_state.last_user_interaction: # agent_state would be undefined
 #                 if not local_state.current_task:
-#                     # res = await client.chat(
-#                     #     model=tool_caller.model,
-#                     #     messages=[Message(role=UserRole.system, content="ユーザーの入力から、ユーザーが何をしたいのかを考えてください。そして、タスクとして、箇条書きでmarkdown形式で出力してください。"),
-#                     #                Message(role=UserRole.user, content=f"ユーザーの入力: {agent_state.last_user_interaction}")],
-#                     # )
-#                     # print('res', res.message)
-#                     # task = res.message.content.split('</think>')[-1].strip()
-#                     task = agent_state.last_user_interaction.strip()
-#                     # local_state.messages.append(Message(role=UserRole.user, content='<task>' + task + '</task>\n以上の内容をタスクとして実行してください'))
+#                     task = agent_state.last_user_interaction.strip() # agent_state would be undefined
 #                     local_state.messages.append(Message(role=UserRole.user, content=task))
 #                     local_state.current_task = task
 #                 else:
-#                     local_state.messages.append(Message(role=UserRole.user, content=agent_state.last_user_interaction))
-#                 agent_state.last_user_interaction = None
-# 
+#                     local_state.messages.append(Message(role=UserRole.user, content=agent_state.last_user_interaction)) # agent_state would be undefined
+#                 agent_state.last_user_interaction = None # agent_state would be undefined
+#
 #             local_state, wait_for_user, done = await tool_caller.action(local_state)
 #             await asyncio.sleep(1)
 #             print('-----最新のメッセージ-----')
 #             for message in local_state.messages[-2:]:
 #                 print(message)
-# 
-#             if wait_for_user:
+#
+#             if wait_for_user: # agent_state would be undefined
 #                 agent_state.busy_with_user = True
-# 
+#
 #             if done:
 #                 print('終了しました')
 #                 local_state = AgentLocalState(messages=Message.init(), current_task="")
-#                 agent_state.busy_with_user = True
+#                 agent_state.busy_with_user = True # agent_state would be undefined
 #     finally:
 #         await shutdown_browser()
+
+async def agent_process_single_task(current_task_state: AgentLocalState, tool_caller: ToolCaller) -> AgentLocalState:
+    temp_local_state = current_task_state
+    max_iterations = 10 # Max iterations to prevent infinite loops
+
+    for i in range(max_iterations):
+        print(f"Agent iteration {i+1}/{max_iterations} for task: {temp_local_state.current_task}")
+
+        # Ensure the messenger is of type A2AMessenger for checking response_ready
+        # This check is more for type safety / debugging if other messengers were used.
+        messenger_is_a2a = isinstance(tool_caller.messenger, A2AMessenger)
+
+        # If the A2AMessenger already has a response (e.g. from 'complete' tool), we can stop early.
+        if messenger_is_a2a and tool_caller.messenger.is_response_ready():
+            print("A2AMessenger has a response ready. Ending task processing early.")
+            break
+
+        temp_local_state, wait_for_user, done = await tool_caller.action(temp_local_state)
+
+        if done:
+            print(f"Task '{temp_local_state.current_task}' marked as done.")
+            # The 'complete' tool should have used the messenger to set the final response.
+            break
+        if wait_for_user:
+            # In A2A, 'ask_to_user' might not be directly usable or mean something different.
+            # If it's used, it implies the agent is stuck waiting for external input not available in A2A.
+            # The 'complete' tool should be used for final output.
+            print(f"Task '{temp_local_state.current_task}' is waiting for user input, which is not supported in A2A. Task may be stuck.")
+            if tool_caller.messenger and messenger_is_a2a and not tool_caller.messenger.is_response_ready():
+                 await tool_caller.messenger.send("Error: Task is blocked waiting for user input in A2A mode.")
+            break
+
+        # Optional: Add a small delay if needed, e.g., await asyncio.sleep(0.1)
+
+    else: # For loop completed without break (max_iterations reached)
+        print(f"Max iterations reached for task: {temp_local_state.current_task}")
+        if tool_caller.messenger and messenger_is_a2a and not tool_caller.messenger.is_response_ready():
+            # If loop finishes and 'complete' wasn't called (or messenger not ready)
+            await tool_caller.messenger.send("Error: Task processing timed out after max iterations.")
+
+    return temp_local_state
 
 
 async def main():
@@ -299,9 +354,15 @@ class ToolCaller:
             asyncio.run_coroutine_threadsafe(self.messenger.send(message), self.loop)
             return "[PENDING]"
 
-        def complete(message: str):
-            """Report to user abount finish task with message. タスクの完了した旨を、すべての文脈を省略せずに内容を要約してメッセージを送信します"""
-            asyncio.run_coroutine_threadsafe(self.messenger.send(message + "\n会話を終了します"), self.loop)
+        async def complete(message: str):
+            """Report to user about finish task with message. For A2A, this message becomes the final response."""
+            if hasattr(self.messenger, 'send') and asyncio.iscoroutinefunction(self.messenger.send):
+                await self.messenger.send(message)
+            elif self.messenger and hasattr(self.messenger, 'send'):
+                # Synchronous fallback, though A2AMessenger is async
+                self.messenger.send(message)
+            else:
+                print(f"Warning: 'complete' tool called but no messenger or send method available. Message: {message}")
             return None
 
         async def search(query: str, augmented_query1: str, augmented_query2: str) -> str:
@@ -428,15 +489,19 @@ class ToolCaller:
                 print('Calling function:', function_name)
                 print('Arguments:', arguments)
                 if function_name == 'ask_to_user':
-                    function_to_call(**arguments)
+                    function_to_call(**arguments) # This is sync, but ask_to_user sends to messenger which might be async.
+                                                 # For A2A, ask_to_user is problematic anyway.
                     copy_messages.append(Message(role=UserRole.assistant, content=arguments['message']))
-                    return AgentLocalState(messages=copy_messages, current_task=current_task), True, False
+                    return AgentLocalState(messages=copy_messages, current_task=current_task), True, False # wait_for_user = True
                 if function_name == 'complete':
-                    function_to_call(**arguments)
-                    copy_messages.append(Message(role=UserRole.assistant, content="タスクを完了しました"))
+                    await function_to_call(**arguments) # Now awaiting the async complete
+                    # The message for the assistant's turn, confirming task completion.
+                    # This is for the internal message history. The actual A2A response is set by messenger.send.
+                    copy_messages.append(Message(role=UserRole.assistant, content="タスク「" + current_task + "」を完了しました。結果をA2Aクライアントに返します。"))
+                    # 'done' is True, 'wait_for_user' can also be True to signal the loop to stop.
                     return AgentLocalState(messages=copy_messages, current_task=current_task), True, True
                 if function_name == 'refine_task':
-                    current_task = function_to_call(**arguments)
+                    current_task = function_to_call(**arguments) # refine_task is synchronous
                     copy_messages.append(Message(role=UserRole.assistant, content="タスクを更新しました"))
                     return AgentLocalState(messages=copy_messages, current_task=current_task), False, False
                 if function_name in ['search', 'infer_knowledge_by_url']:
@@ -465,23 +530,87 @@ if __name__ == "__main__":
     asyncio.run(main())
 
 
-class SearchServiceAgent(Agent):
-    def __init__(self, client, browser): # Pass existing client and browser
+class SearchServiceAgent(Agent): # Assuming Agent is from a2a.agent
+    def __init__(self, ollama_client, browser):
         super().__init__()
-        self.tool_caller = ToolCaller(client, None, browser) # Messenger is None for now
+        self.ollama_client = ollama_client # Store the Ollama client
+        self.browser = browser       # Store the browser instance
+        # ToolCaller will be instantiated per request in handle_search
 
     async def handle_search(self, query: str) -> str:
-        print(f"Received search query: {query}")
-        try:
-            # The original search tool is async.
-            # The ToolCaller's search tool expects augmented_query1 and augmented_query2.
-            # We'll pass the query as all three for now.
-            search_results_text = await self.tool_caller.available_functions['search'](
-                query=query,
-                augmented_query1=query,
-                augmented_query2=query
-            )
-            return search_results_text
-        except Exception as e:
-            print(f"Error during search: {e}")
-            return f"Error performing search: {str(e)}"
+        print(f"A2A SearchServiceAgent: Received search query: {query}")
+
+        # 1. Instantiate A2AMessenger for this request
+        a2a_messenger = A2AMessenger()
+
+        # 2. Instantiate ToolCaller with the A2AMessenger
+        # Make sure the ToolCaller is compatible with receiving the ollama_client and browser if needed
+        tool_caller = ToolCaller(client=self.ollama_client, messenger=a2a_messenger, browser=self.browser)
+
+        # 3. Prepare AgentLocalState for the task
+        # The initial messages might need to include the system prompt and the user's query.
+        initial_messages = Message.init() # Gets SYSTEM_PROMPT and current date
+        initial_messages.append(Message(role=UserRole.user, content=query))
+
+        current_task_state = AgentLocalState(
+            messages=initial_messages,
+            current_task=query # The query itself is the task description
+        )
+
+        # 4. Call a refactored version of the agent's main loop
+        # This loop will run until the task is 'done' (e.g., 'complete' tool is called).
+        # We'll define `agent_process_single_task` in the next plan step.
+        # It will take current_task_state and tool_caller as arguments.
+        # For now, assume it modifies current_task_state and uses tool_caller.
+
+        # Placeholder for the call to the refactored loop:
+        # final_task_state = await agent_process_single_task(current_task_state, tool_caller)
+
+        # For this subtask, we'll just simulate that the loop ran and the messenger was used.
+        # In a real scenario, the agent_process_single_task would call tool_caller.complete()
+        # which would use a2a_messenger.send().
+        # Simulating this:
+        # await a2a_messenger.send(f"Simulated processed result for: {query}")
+
+        # The actual call will be implemented/refined in conjunction with Step 4 of the plan.
+        # For now, let's assume the loop will run and use the messenger.
+        # The test for this step will focus on the setup.
+        # We need to integrate the actual loop call later.
+
+        # What we expect:
+        # After `agent_process_single_task` runs, `a2a_messenger.is_response_ready()` should be true,
+        # and `a2a_messenger.get_final_response()` should have the result.
+
+        # This subtask focuses on setting up handle_search.
+        # The actual execution logic using agent_process_single_task will be the next step.
+        # For now, return a placeholder indicating setup.
+
+        print(f"SearchServiceAgent: Placeholder for running agent_process_single_task with query: {query}")
+        # In the fully implemented version, we would wait for the loop and then:
+        # if a2a_messenger.is_response_ready():
+        #     final_response = a2a_messenger.get_final_response()
+        #     print(f"A2A SearchServiceAgent: Sending response: {final_response}")
+        #     return final_response if final_response is not None else "Error: No response generated."
+        # else:
+        #     print("A2A SearchServiceAgent: Error: Response not ready after task processing.")
+        #     return "Error: Agent did not produce a final response."
+
+
+        # 4. Call the agent processing loop
+        processed_task_state = await agent_process_single_task(current_task_state, tool_caller)
+
+        # 5. Retrieve and return the response from the A2AMessenger
+        if a2a_messenger.is_response_ready():
+            final_response = a2a_messenger.get_final_response()
+            print(f"A2A SearchServiceAgent: Sending response: {final_response}")
+            # Ensure a string is always returned.
+            return final_response if final_response is not None else "Error: Agent generated a null response."
+        else:
+            # This case might occur if the loop finished due to max_iterations
+            # or another condition without the 'complete' tool being called successfully.
+            print("A2A SearchServiceAgent: Error: Response not ready after task processing.")
+            # Check if a timeout message was set by agent_process_single_task
+            timeout_response = a2a_messenger.get_final_response()
+            if timeout_response and "Error: Task processing timed out" in timeout_response:
+                return timeout_response
+            return "Error: Agent did not produce a final response or timed out without specific error."
