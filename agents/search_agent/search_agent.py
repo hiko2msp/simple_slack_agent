@@ -11,6 +11,10 @@ from ollama import AsyncClient
 from datetime import datetime
 import traceback
 from playwright.async_api import async_playwright, Browser
+from a2a.server import A2AServer
+from a2a.agent import Agent
+from a2a.message import Message as A2AMessage # Alias to avoid conflict with existing Message
+
 
 from abc import ABC, abstractmethod
 class Messenger(ABC):
@@ -116,56 +120,79 @@ class AgentLocalState(BaseModel):
     current_task: str = ""
 
 
-agent_state = AgentState()
+# agent_state = AgentState()
 
-async def agent_main_loop():
-    await initialize_browser()
+# async def agent_main_loop():
+#     await initialize_browser()
+#     if not _browser:
+#         print("Failed to initialize browser. Agent loop cannot start.")
+#         return
+#     local_state = AgentLocalState(messages=Message.init(), current_task="")
+#     try:
+#         while agent_state.running:
+#             tool_caller = ToolCaller(client, agent_state.messenger, _browser)
+#             if agent_state.busy_with_user:
+#                 await asyncio.sleep(3)
+#                 continue
+# 
+#             if agent_state.last_user_interaction:
+#                 if not local_state.current_task:
+#                     # res = await client.chat(
+#                     #     model=tool_caller.model,
+#                     #     messages=[Message(role=UserRole.system, content="ユーザーの入力から、ユーザーが何をしたいのかを考えてください。そして、タスクとして、箇条書きでmarkdown形式で出力してください。"),
+#                     #                Message(role=UserRole.user, content=f"ユーザーの入力: {agent_state.last_user_interaction}")],
+#                     # )
+#                     # print('res', res.message)
+#                     # task = res.message.content.split('</think>')[-1].strip()
+#                     task = agent_state.last_user_interaction.strip()
+#                     # local_state.messages.append(Message(role=UserRole.user, content='<task>' + task + '</task>\n以上の内容をタスクとして実行してください'))
+#                     local_state.messages.append(Message(role=UserRole.user, content=task))
+#                     local_state.current_task = task
+#                 else:
+#                     local_state.messages.append(Message(role=UserRole.user, content=agent_state.last_user_interaction))
+#                 agent_state.last_user_interaction = None
+# 
+#             local_state, wait_for_user, done = await tool_caller.action(local_state)
+#             await asyncio.sleep(1)
+#             print('-----最新のメッセージ-----')
+#             for message in local_state.messages[-2:]:
+#                 print(message)
+# 
+#             if wait_for_user:
+#                 agent_state.busy_with_user = True
+# 
+#             if done:
+#                 print('終了しました')
+#                 local_state = AgentLocalState(messages=Message.init(), current_task="")
+#                 agent_state.busy_with_user = True
+#     finally:
+#         await shutdown_browser()
+
+
+async def main():
+    await initialize_browser() # Keep browser initialization
     if not _browser:
-        print("Failed to initialize browser. Agent loop cannot start.")
+        print("Failed to initialize browser. A2A Server cannot start.")
         return
-    local_state = AgentLocalState(messages=Message.init(), current_task="")
+
+    # Ollama client is already global
+    # global client
+
+    search_agent_service = SearchServiceAgent(client, _browser)
+
+    # Configure the server (host and port should be from env vars or defaults)
+    host = os.getenv("A2A_HOST", "0.0.0.0")
+    port = int(os.getenv("A2A_PORT", "8080"))
+
+    server = A2AServer(search_agent_service, host, port)
+    print(f"Starting A2A server for Search Agent on {host}:{port}")
     try:
-        while agent_state.running:
-            tool_caller = ToolCaller(client, agent_state.messenger, _browser)
-            if agent_state.busy_with_user:
-                await asyncio.sleep(3)
-                continue
-
-            if agent_state.last_user_interaction:
-                if not local_state.current_task:
-                    # res = await client.chat(
-                    #     model=tool_caller.model,
-                    #     messages=[Message(role=UserRole.system, content="ユーザーの入力から、ユーザーが何をしたいのかを考えてください。そして、タスクとして、箇条書きでmarkdown形式で出力してください。"),
-                    #                Message(role=UserRole.user, content=f"ユーザーの入力: {agent_state.last_user_interaction}")],
-                    # )
-                    # print('res', res.message)
-                    # task = res.message.content.split('</think>')[-1].strip()
-                    task = agent_state.last_user_interaction.strip()
-                    # local_state.messages.append(Message(role=UserRole.user, content='<task>' + task + '</task>\n以上の内容をタスクとして実行してください'))
-                    local_state.messages.append(Message(role=UserRole.user, content=task))
-                    local_state.current_task = task
-                else:
-                    local_state.messages.append(Message(role=UserRole.user, content=agent_state.last_user_interaction))
-                agent_state.last_user_interaction = None
-
-            local_state, wait_for_user, done = await tool_caller.action(local_state)
-            await asyncio.sleep(1)
-            print('-----最新のメッセージ-----')
-            for message in local_state.messages[-2:]:
-                print(message)
-
-            if wait_for_user:
-                agent_state.busy_with_user = True
-
-            if done:
-                print('終了しました')
-                local_state = AgentLocalState(messages=Message.init(), current_task="")
-                agent_state.busy_with_user = True
+        await server.start() # Assuming a start() method
+    except KeyboardInterrupt:
+        print("Server shutting down...")
     finally:
-        await shutdown_browser()
-
-
-
+        await server.stop() # Assuming a stop() method
+        await shutdown_browser() # Keep browser shutdown
 
 async def select_tool(model, messages, tools):
     all_message = ''
@@ -436,3 +463,25 @@ class ToolCaller:
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+class SearchServiceAgent(Agent):
+    def __init__(self, client, browser): # Pass existing client and browser
+        super().__init__()
+        self.tool_caller = ToolCaller(client, None, browser) # Messenger is None for now
+
+    async def handle_search(self, query: str) -> str:
+        print(f"Received search query: {query}")
+        try:
+            # The original search tool is async.
+            # The ToolCaller's search tool expects augmented_query1 and augmented_query2.
+            # We'll pass the query as all three for now.
+            search_results_text = await self.tool_caller.available_functions['search'](
+                query=query,
+                augmented_query1=query,
+                augmented_query2=query
+            )
+            return search_results_text
+        except Exception as e:
+            print(f"Error during search: {e}")
+            return f"Error performing search: {str(e)}"

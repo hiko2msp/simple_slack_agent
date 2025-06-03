@@ -15,12 +15,19 @@ import json
 from dotenv import load_dotenv
 import sqlite3
 import time
+from a2a.client import A2AClient
+from a2a.message import Message as A2AMessage # If needed for constructing requests
 
 load_dotenv()
 
 MODEL = "qwen3:32b"  # Default model, can be overridden by environment variable
 DB_PATH = "memory.db"
 MEMORY_FEATURE_ENABLED = os.getenv("MEMORY_FEATURE_ENABLED", "false").lower() == "true"
+
+SEARCH_AGENT_A2A_HOST = os.getenv("SEARCH_AGENT_A2A_HOST", "localhost")
+SEARCH_AGENT_A2A_PORT = int(os.getenv("SEARCH_AGENT_A2A_PORT", "8080"))
+
+_search_mode_state = defaultdict(bool)
 
 
 # Define Pydantic model for system prompt rules
@@ -302,6 +309,46 @@ async def handle_app_mention(body, say, ack):
     user_message = body["event"].get("text", "") or body["event"].get("message", {}).get("text", "")
     thread_ts = body["event"].get("thread_ts", body["event"]["ts"])
     # channel_id = body["event"]["channel"] # Useful for potential logging or context
+
+    # Search mode command handling
+    user_message_lower = user_message.strip().lower()
+    if user_message_lower == "/search":
+        _search_mode_state[thread_ts] = True
+        await send(say, "Entered search mode. Send your queries. Type `/search_exit` to leave.", thread_ts)
+        return
+    elif user_message_lower == "/search_exit":
+        _search_mode_state[thread_ts] = False
+        await send(say, "Exited search mode.", thread_ts)
+        return
+
+    # If in search mode, handle query
+    if _search_mode_state[thread_ts]:
+        client_a2a = A2AClient(remote_host=SEARCH_AGENT_A2A_HOST, remote_port=SEARCH_AGENT_A2A_PORT)
+        try:
+            print(f"Search mode active for {thread_ts}. Query: {user_message}. Contacting A2A server at {SEARCH_AGENT_A2A_HOST}:{SEARCH_AGENT_A2A_PORT}")
+            await client_a2a.connect()
+            response_data = await client_a2a.call_method("handle_search", query=user_message)
+            
+            if isinstance(response_data, A2AMessage):
+                search_result = response_data.content
+            elif isinstance(response_data, str):
+                search_result = response_data
+            elif isinstance(response_data, dict) and 'result' in response_data:
+                search_result = response_data['result']
+            else:
+                search_result = str(response_data)
+
+            await send(say, f"Search results:\n{search_result}", thread_ts)
+
+        except Exception as e:
+            error_message = f"Error communicating with search agent: {e}"
+            print(error_message)
+            traceback.print_exc()
+            await send(say, error_message, thread_ts)
+        finally:
+            if hasattr(client_a2a, 'is_connected') and client_a2a.is_connected():
+                await client_a2a.disconnect()
+        return
 
     # --- START NEW INTEGRATION ---
     if user_message.startswith("システムプロンプト:"):

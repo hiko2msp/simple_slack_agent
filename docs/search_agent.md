@@ -1,9 +1,9 @@
 # Search Agent
 
 ## Overview
-The Search Agent is an autonomous component designed for research, task completion, and interaction with local files and web resources. It leverages an Ollama-based Large Language Model (LLM), specifically Qwen (model `qwen3_30_64:latest` by default), for reasoning, tool selection, and decision-making throughout its operation.
+The Search Agent is an autonomous component designed for research and information retrieval. It leverages an Ollama-based Large Language Model (LLM), specifically Qwen (model `qwen3_30_64:latest` by default), for reasoning and executing search tasks.
 
-The primary purpose of the Search Agent is to understand user-provided tasks or queries and utilize a suite of available tools to gather information, manipulate files, and ultimately provide a comprehensive answer or complete the assigned objective.
+The Search Agent now operates as an **A2A (Agent-to-Agent) server**. Its primary purpose is to expose its search capabilities as a service that other agents (like the Slack Agent) can connect to and utilize. It listens for incoming A2A requests and uses its suite of tools, particularly web search and URL content inference, to gather information and return it to the calling agent.
 
 ## Features / Capabilities
 
@@ -40,43 +40,47 @@ To run the Search Agent, ensure the following setup and configuration steps are 
     *   This is different from the main Slack bot's Ollama configuration (`OLLAMA_HOST` environment variable, typically `http://localhost:11434`).
     *   Ensure an Ollama instance is running and accessible at this address, with the required model (e.g., `qwen3_30_64:latest`) available.
 
-3.  **Playwright Browsers:**
+3.  **A2A Server Configuration:**
+    The Search Agent runs as an A2A server. Configure its listening host and port using these environment variables (also documented in [Configuration](./configuration.md#search-agent-a2a-server-configuration)):
+    *   `A2A_HOST`: Host for the A2A server (default: `0.0.0.0`).
+    *   `A2A_PORT`: Port for the A2A server (default: `8080`).
+
+4.  **Playwright Browsers:**
     The agent uses Playwright for web browsing. If you haven't used Playwright before or if the necessary browser binaries are missing, you may need to install them. Playwright attempts to download these automatically when the agent initializes its browser. However, you can also install them manually:
     ```bash
     playwright install
     ```
     This command should be run in your project's virtual environment if you are using one.
 
-## Running the Search Agent
+## Running the Search Agent as an A2A Server
 
-The Search Agent is a standalone script and runs separately from the main Slack bot application.
+The Search Agent now primarily runs as an A2A server, making its search capabilities available to other agents.
 
 1.  **Command-Line Execution:**
     Navigate to the root directory of the project and run the agent using:
     ```bash
     python agents/search_agent/search_agent.py
     ```
+    This will start the A2A server on the host and port defined by the `A2A_HOST` and `A2A_PORT` environment variables (or their defaults).
 
-2.  **Interaction Flow:**
-    *   Upon starting, the agent initializes its components, including the Playwright browser.
-    *   The agent operates in a loop. The `agent_state.busy_with_user` flag (initially `True`) suggests it waits for an initial user input or task. The exact mechanism for providing this initial task in the current `search_agent.py` script (e.g., if it prompts directly or if `agent_state.last_user_interaction` needs to be set programmatically for an initial task) might require inspection of how `main()` or `agent_main_loop()` is triggered and if it includes initial user input handling.
-    *   Once a task is provided (e.g., typed into the console when the agent is ready for input), the agent's LLM (`select_tool`) decides on the next action or tool to use.
-    *   If a tool is selected (e.g., `search`, `read_file`), the `ToolCaller` executes it.
-    *   The results of the tool are then fed back into the LLM's context.
-    *   If the agent needs user input (e.g., using `ask_to_user`), it will print a message to the console and wait for the user to type a response.
-    *   This process (LLM reasoning -> tool use -> result processing -> LLM reasoning) continues until the task is completed (using the `complete` tool) or if the agent cannot proceed.
-    *   Console output will show the agent's thoughts, selected tools, tool outputs, and messages to the user.
+2.  **Server Operation:**
+    *   Upon starting, the agent initializes its components, including the Playwright browser and the Ollama client.
+    *   It then starts the A2A server and waits for incoming connections and requests.
+    *   The main exposed service method is `handle_search(query: str)`, which takes a search query string.
+    *   When a request is received (e.g., from the Slack Agent in search mode), the `SearchServiceAgent` uses its `ToolCaller` instance (specifically the `search` tool) to perform the web search.
+    *   The search results are then returned to the calling A2A client.
+    *   Console output will show server startup messages, incoming search queries, and any errors encountered during search operations.
 
-## How it Works (Simplified)
+## How it Works (A2A Server Mode)
 
--   **Main Loop (`agent_main_loop`):** The core of the agent, continuously processing tasks. It initializes the browser and enters a loop that manages the agent's state and interactions.
--   **State Management (`AgentState`, `AgentLocalState`):**
-    *   `AgentState`: Global state, including whether the agent is running, busy with the user, and the last user interaction.
-    *   `AgentLocalState`: Contains the conversation history (`messages`) and the `current_task`.
--   **Messages (`Message` class):** Pydantic models representing messages in the conversation, with roles like `system`, `user`, `assistant`, and `tool`. The conversation history is a list of these messages.
--   **Tool Selection and Execution (`ToolCaller`):**
-    *   The `ToolCaller.action` method is central to the agent's operation.
-    *   It calls `select_tool`, where the LLM analyzes the current conversation and task to choose an appropriate tool and its arguments.
-    *   The selected tool function (e.g., `read_file`, `search`) is then invoked.
-    *   The output of the tool is formatted and added to the message history as a `user` message (simulating the environment's response), so the LLM can process the result in the next iteration.
--   **User Interaction:** The `Messenger` class (abstract) is intended to handle communication. In the standalone script, this is implicitly console input/output, especially for tools like `ask_to_user` and `report_to_user`. The `agent_state.busy_with_user` flag and `agent_state.last_user_interaction` manage when the agent waits for or processes user input.
+-   **A2A Server Initialization (`main` function):**
+    *   The `main` function in `agents/search_agent/search_agent.py` now initializes and starts the `A2AServer`.
+    *   It sets up the `SearchServiceAgent` instance, passing it the Ollama client and the initialized Playwright browser.
+-   **`SearchServiceAgent(Agent)`:**
+    *   This class, derived from the A2A SDK's `Agent` class, defines the server-side agent logic.
+    *   Its `__init__` method initializes a `ToolCaller` instance. Note that the `messenger` component of `ToolCaller` is set to `None`, as direct user interaction (like `ask_to_user`) is not expected in this A2A service mode.
+    *   The key method is `async def handle_search(self, query: str) -> str`. This method is exposed via the A2A server. When called, it uses the `search` function from its `ToolCaller`'s available functions to perform the search using the provided `query`. The original `search` tool expects `augmented_query1` and `augmented_query2`; in the `handle_search` adapter, the main `query` is currently passed for these as well for simplicity.
+-   **Tool Usage (`ToolCaller`):**
+    *   The `ToolCaller` remains responsible for managing and executing the actual search tools (`search`, `infer_knowledge_by_url`).
+    *   The `search` tool utilizes `batch_search` (Google Custom Search API) and `get_content` (Playwright for fetching URLs from search results if needed, though `handle_search` primarily returns raw search results).
+-   **No Direct User Interaction Loop:** Unlike its previous standalone version, the A2A server mode does not involve a direct console-based interaction loop for tasks, tool selection by an LLM for general purposes, or user prompts via `ask_to_user`. Its interaction is now solely based on handling A2A requests for the `handle_search` method.
