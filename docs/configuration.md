@@ -29,6 +29,38 @@ The following environment variables are required:
     -   **Example:** `MEMORY_FEATURE_ENABLED=true`
     -   **Default:** `false`
 
+## A2A Integration Configuration
+
+The system uses an Agent-to-Agent (A2A) communication protocol for certain features, such as the dedicated search functionality provided by the `search_agent`.
+
+### Search Agent (A2A Server) Configuration
+
+These variables configure the A2A server running within the `search_agent`:
+
+-   `A2A_HOST`:
+    -   **Description:** The host address the `search_agent`'s A2A server binds to. This determines on which network interface the server listens. Use `0.0.0.0` to listen on all available interfaces, or `localhost` for local connections only.
+    -   **Default:** `0.0.0.0`
+    -   **Example:** `A2A_HOST=0.0.0.0`
+
+-   `A2A_PORT`:
+    -   **Description:** The port number the `search_agent`'s A2A server listens on.
+    -   **Default:** `8080`
+    -   **Example:** `A2A_PORT=8080`
+
+### Slack Agent (A2A Client) Configuration
+
+These variables configure the `slack_agent` to connect to the `search_agent`'s A2A server:
+
+-   `SEARCH_AGENT_A2A_HOST`:
+    -   **Description:** The hostname or IP address where the `search_agent`'s A2A server is running, as seen from the `slack_agent`.
+    -   **Default:** `localhost` (assumes `search_agent` is running on the same machine)
+    -   **Example:** `SEARCH_AGENT_A2A_HOST=search-agent-service` (if running in a containerized environment with service discovery)
+
+-   `SEARCH_AGENT_A2A_PORT`:
+    -   **Description:** The port number of the `search_agent`'s A2A server that the `slack_agent` should connect to.
+    -   **Default:** `8080`
+    -   **Example:** `SEARCH_AGENT_A2A_PORT=8080`
+
 ## Ollama Model
 
 The specific Large Language Model used by the bot is defined directly in the `main.py` file.

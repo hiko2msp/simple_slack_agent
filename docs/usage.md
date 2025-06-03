@@ -39,6 +39,38 @@ The bot listens for messages in channels it has been added to and in direct mess
     Translation: "You are an excellent agent. Behave humbly and interact concisely with users. Please respond in markdown format."
     This means the bot will aim to be helpful, polite, concise, and will format its answers using markdown.
 
+## Slack Agent Search Mode
+
+The Slack Agent features a dedicated "Search Mode" that allows you to send queries directly to the integrated `search_agent`. This mode is useful for when you specifically need web search results or other information the `search_agent` can provide, bypassing the Slack Agent's general LLM conversational abilities for that query.
+
+**How to Use Search Mode:**
+
+1.  **Enter Search Mode:**
+    To enter search mode within a specific Slack thread, type the command:
+    ```
+    /search
+    ```
+    The bot will confirm that you have entered search mode for that thread.
+
+2.  **Send Queries:**
+    Once in search mode, any message you send in that thread will be treated as a query to the `search_agent`.
+    For example:
+    ```
+    What are the latest developments in AI?
+    ```
+    The `slack_agent` will forward this query to the `search_agent`, and the results from the `search_agent` will be posted back into the thread.
+
+3.  **Exit Search Mode:**
+    To exit search mode and return to normal conversation with the Slack Agent's LLM in that thread, type the command:
+    ```
+    /search_exit
+    ```
+    The bot will confirm that you have exited search mode. Further messages in the thread will be processed by the Slack Agent's primary LLM again.
+
+**Note:**
+- Search mode is specific to each Slack thread. You can be in search mode in one thread and in normal conversation mode in another.
+- If you send `/search` in a thread where you are already in search mode, it will effectively do nothing but might re-confirm you are in search mode. Similarly for `/search_exit`.
+
 ## Conversation Memory Feature (Optional)
 
 This bot includes an optional conversation memory feature. If enabled by the administrator (using the `MEMORY_FEATURE_ENABLED` environment variable), the bot will:
