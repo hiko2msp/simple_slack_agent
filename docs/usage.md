@@ -67,6 +67,13 @@ Here's a hypothetical example of an interaction:
 >
 > They don't "think" or "understand" in the way humans do, but they are very good at recognizing patterns in language and using those patterns to produce relevant and coherent responses.
 
+## Using the Search Agent
+
+This project also includes a **Search Agent**, which is a separate, standalone tool designed for more complex tasks involving web searches, file operations, and command execution. It operates independently of the Slack bot.
+
+For detailed instructions on how to set up, configure, and run the Search Agent, please refer to its dedicated documentation:
+- **[Search Agent Documentation](search_agent.md)**
+
 ---
 
-Refer to the [Configuration](./configuration.md) page for details on how to customize the bot's behavior, such as the Ollama model it uses.
+Refer to the [Configuration](./configuration.md) page for details on how to customize the Slack bot's behavior, such as the Ollama model it uses.
