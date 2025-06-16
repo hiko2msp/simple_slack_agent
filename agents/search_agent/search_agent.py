@@ -1,19 +1,15 @@
 import os
 import pathlib
-from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from pydantic import BaseModel, Field
 from typing import List, Tuple
 from enum import Enum
 import asyncio
 import subprocess
-from search import batch_search, get_content
+from search_tools import batch_search, get_content
 from ollama import AsyncClient
 from datetime import datetime
 import traceback
 from playwright.async_api import async_playwright, Browser
-from a2a.server import A2AServer
-from a2a.agent import Agent
-from a2a.message import Message as A2AMessage # Alias to avoid conflict with existing Message
 
 
 from abc import ABC, abstractmethod
@@ -524,93 +520,33 @@ class ToolCaller:
         return AgentLocalState(messages=copy_messages, current_task=current_task), False, False
 
 
+from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.events import EventQueue
+from a2a.utils import new_agent_text_message
+
+class SearchAgent:
+    """Hello World Agent."""
+
+    async def invoke(self) -> str:
+        return 'Hello World'
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+class SearchAgentExecutor(AgentExecutor):
+    """Test AgentProxy Implementation."""
 
+    def __init__(self):
+        self.agent = SearchAgent()
 
-class SearchServiceAgent(Agent): # Assuming Agent is from a2a.agent
-    def __init__(self, ollama_client, browser):
-        super().__init__()
-        self.ollama_client = ollama_client # Store the Ollama client
-        self.browser = browser       # Store the browser instance
-        # ToolCaller will be instantiated per request in handle_search
+    async def execute(
+        self,
+        context: RequestContext,
+        event_queue: EventQueue,
+    ) -> None:
+        result = await self.agent.invoke()
+        event_queue.enqueue_event(new_agent_text_message(result))
 
-    async def handle_search(self, query: str) -> str:
-        print(f"A2A SearchServiceAgent: Received search query: {query}")
+    async def cancel(
+        self, context: RequestContext, event_queue: EventQueue
+    ) -> None:
+        raise Exception('cancel not supported')
 
-        # 1. Instantiate A2AMessenger for this request
-        a2a_messenger = A2AMessenger()
-
-        # 2. Instantiate ToolCaller with the A2AMessenger
-        # Make sure the ToolCaller is compatible with receiving the ollama_client and browser if needed
-        tool_caller = ToolCaller(client=self.ollama_client, messenger=a2a_messenger, browser=self.browser)
-
-        # 3. Prepare AgentLocalState for the task
-        # The initial messages might need to include the system prompt and the user's query.
-        initial_messages = Message.init() # Gets SYSTEM_PROMPT and current date
-        initial_messages.append(Message(role=UserRole.user, content=query))
-
-        current_task_state = AgentLocalState(
-            messages=initial_messages,
-            current_task=query # The query itself is the task description
-        )
-
-        # 4. Call a refactored version of the agent's main loop
-        # This loop will run until the task is 'done' (e.g., 'complete' tool is called).
-        # We'll define `agent_process_single_task` in the next plan step.
-        # It will take current_task_state and tool_caller as arguments.
-        # For now, assume it modifies current_task_state and uses tool_caller.
-
-        # Placeholder for the call to the refactored loop:
-        # final_task_state = await agent_process_single_task(current_task_state, tool_caller)
-
-        # For this subtask, we'll just simulate that the loop ran and the messenger was used.
-        # In a real scenario, the agent_process_single_task would call tool_caller.complete()
-        # which would use a2a_messenger.send().
-        # Simulating this:
-        # await a2a_messenger.send(f"Simulated processed result for: {query}")
-
-        # The actual call will be implemented/refined in conjunction with Step 4 of the plan.
-        # For now, let's assume the loop will run and use the messenger.
-        # The test for this step will focus on the setup.
-        # We need to integrate the actual loop call later.
-
-        # What we expect:
-        # After `agent_process_single_task` runs, `a2a_messenger.is_response_ready()` should be true,
-        # and `a2a_messenger.get_final_response()` should have the result.
-
-        # This subtask focuses on setting up handle_search.
-        # The actual execution logic using agent_process_single_task will be the next step.
-        # For now, return a placeholder indicating setup.
-
-        print(f"SearchServiceAgent: Placeholder for running agent_process_single_task with query: {query}")
-        # In the fully implemented version, we would wait for the loop and then:
-        # if a2a_messenger.is_response_ready():
-        #     final_response = a2a_messenger.get_final_response()
-        #     print(f"A2A SearchServiceAgent: Sending response: {final_response}")
-        #     return final_response if final_response is not None else "Error: No response generated."
-        # else:
-        #     print("A2A SearchServiceAgent: Error: Response not ready after task processing.")
-        #     return "Error: Agent did not produce a final response."
-
-
-        # 4. Call the agent processing loop
-        processed_task_state = await agent_process_single_task(current_task_state, tool_caller)
-
-        # 5. Retrieve and return the response from the A2AMessenger
-        if a2a_messenger.is_response_ready():
-            final_response = a2a_messenger.get_final_response()
-            print(f"A2A SearchServiceAgent: Sending response: {final_response}")
-            # Ensure a string is always returned.
-            return final_response if final_response is not None else "Error: Agent generated a null response."
-        else:
-            # This case might occur if the loop finished due to max_iterations
-            # or another condition without the 'complete' tool being called successfully.
-            print("A2A SearchServiceAgent: Error: Response not ready after task processing.")
-            # Check if a timeout message was set by agent_process_single_task
-            timeout_response = a2a_messenger.get_final_response()
-            if timeout_response and "Error: Task processing timed out" in timeout_response:
-                return timeout_response
-            return "Error: Agent did not produce a final response or timed out without specific error."
