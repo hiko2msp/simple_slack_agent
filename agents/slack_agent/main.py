@@ -24,7 +24,6 @@ load_dotenv()
 
 # MODEL = "qwen3:32b"  # Default model, can be overridden by environment variable
 MODEL = "r1tool:latest"  # Default model, can be overridden by environment variable
-DB_PATH = "memory.db"
 MEMORY_FEATURE_ENABLED = os.getenv("MEMORY_FEATURE_ENABLED", "false").lower() == "true"
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:12345")
 
@@ -139,71 +138,24 @@ def execute_python_code(code_string: str) -> dict:
     return {"stdout": stdout_result, "stderr": stderr_result}
 
 
-def init_db():
+def add_memory(text: str, user_id: str):
     try:
-        con = sqlite3.connect(DB_PATH)
-        cur = con.cursor()
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS memories (
-                thread_ts TEXT NOT NULL PRIMARY KEY,
-                timestamp REAL NOT NULL,
-                summary TEXT NOT NULL
-            )
-        ''')
-        # Index on timestamp remains useful for ordering by last update time
-        cur.execute('''
-            CREATE INDEX IF NOT EXISTS idx_memories_timestamp ON memories (timestamp DESC)
-        ''')
-        con.commit()
-        print("Database initialized successfully with updated schema.")
-    except sqlite3.Error as e:
-        print(f"Database initialization error: {e}")
-    finally:
-        if con:
-            con.close()
+        memory.add(text, user_id=user_id)
+        print(f"Memory added for user {user_id}")
+    except Exception as e:
+        print(f"Error adding memory for user {user_id}: {e}")
 
-def add_memory(thread_ts: str, summary: str):
-    try:
-        con = sqlite3.connect(DB_PATH)
-        cur = con.cursor()
-        current_time = time.time() # Capture time once
-        cur.execute("""
-            INSERT INTO memories (thread_ts, timestamp, summary) VALUES (?, ?, ?)
-            ON CONFLICT(thread_ts) DO UPDATE SET
-                timestamp = excluded.timestamp,
-                summary = excluded.summary
-        """, (thread_ts, current_time, summary)) # Pass current_time
-        con.commit()
-        print(f"Memory added/updated for thread {thread_ts}")
-    except sqlite3.Error as e:
-        print(f"Error adding/updating memory for thread {thread_ts}: {e}")
-    finally:
-        if con:
-            con.close()
-
-def get_recent_memories(limit: int = 5) -> list[str]: # New signature
+def get_recent_memories(user_id: str, query: str, limit: int = 5) -> list[str]:
     memories = []
     try:
-        con = sqlite3.connect(DB_PATH)
-        cur = con.cursor()
-        # cur.execute("SELECT summary FROM memories WHERE thread_ts = ? ORDER BY timestamp DESC LIMIT ?",
-        #             (thread_ts, limit)) # Old query
-        cur.execute("SELECT summary FROM memories ORDER BY timestamp DESC LIMIT ?",
-                    (limit,)) # New query
-        rows = cur.fetchall()
-        memories = [row[0] for row in rows]
-        memories.reverse() # Maintain chronological order for the prompt
-        # print(f"Retrieved {len(memories)} memories for thread {thread_ts}") # Old log
-        print(f"Retrieved {len(memories)} global memories") # New log
-    except sqlite3.Error as e:
-        # print(f"Error retrieving memories for thread {thread_ts}: {e}") # Old log
-        print(f"Error retrieving global memories: {e}") # New log
-    finally:
-        if con:
-            con.close()
+        relevant_memories = memory.search(query=query, user_id=user_id, limit=limit)
+        memories = [entry['memory'] for entry in relevant_memories["results"]] if relevant_memories and relevant_memories.get("results") else []
+        print(f"Retrieved {len(memories)} memories for user {user_id} with query '{query}'")
+    except Exception as e:
+        print(f"Error retrieving memories for user {user_id} with query '{query}': {e}")
     return memories
 
-def _construct_initial_system_prompt(thread_ts: str, user_message: str) -> str:
+def _construct_initial_system_prompt(thread_ts: str, user_message: str, user_id: str) -> str:
     system_prompt_content = ""
     default_prompt_template = "" # Initialize default_prompt_template
 
@@ -224,7 +176,7 @@ def _construct_initial_system_prompt(thread_ts: str, user_message: str) -> str:
             print(f"Warning: No matching system prompt rule found for user message and no default rule set. Using a generic default.")
 
     if MEMORY_FEATURE_ENABLED:
-        recent_memories = get_recent_memories()
+        recent_memories = get_recent_memories(user_id=user_id, query=user_message)
         if recent_memories:
             memory_header = "\n\n## Reference from Past Conversations (Summaries) - Use these lightly for context if relevant:\n"
             formatted_memories = "\n".join([f"- {mem}" for mem in recent_memories])
@@ -354,6 +306,7 @@ async def handle_app_mention(body, say, ack):
 
     user_message = body["event"].get("text", "") or body["event"].get("message", {}).get("text", "")
     thread_ts = body["event"].get("thread_ts", body["event"]["ts"])
+    slack_user_id = body["event"].get("user")
     # channel_id = body["event"]["channel"] # Useful for potential logging or context
 
     # --- START NEW INTEGRATION ---
@@ -369,7 +322,7 @@ async def handle_app_mention(body, say, ack):
 
     if not _messages.get(thread_ts):
         # Construct system prompt based on user message using the new rule-based function
-        final_system_prompt = _construct_initial_system_prompt(thread_ts, user_message)
+        final_system_prompt = _construct_initial_system_prompt(thread_ts, user_message, slack_user_id)
         _messages[thread_ts].append(
             Message(role=UserRole.system, content=final_system_prompt)
         )
@@ -472,7 +425,7 @@ async def handle_app_mention(body, say, ack):
                 )
                 interaction_summary = summary_res.message.get('content', '').strip()
                 if interaction_summary:
-                    add_memory(thread_ts, interaction_summary) # thread_ts is still key for storage
+                    add_memory(text=interaction_summary, user_id=slack_user_id)
                 else:
                     print(f"Summarization result was empty for thread {thread_ts}")
             except Exception as e:
@@ -497,7 +450,6 @@ async def warm_up():
 
 
 if __name__ == "__main__":
-    init_db()
     handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"], loop=asyncio.get_event_loop())
     asyncio.get_event_loop().run_until_complete(warm_up())
     asyncio.get_event_loop().run_until_complete(handler.start_async())
