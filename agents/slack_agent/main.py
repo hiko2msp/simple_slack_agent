@@ -15,12 +15,65 @@ import json
 from dotenv import load_dotenv
 import sqlite3
 import time
+from mem0 import Memory
+from mem0.configs.base import MemoryConfig
+
+
 
 load_dotenv()
 
-MODEL = "qwen3:32b"  # Default model, can be overridden by environment variable
+# MODEL = "qwen3:32b"  # Default model, can be overridden by environment variable
+MODEL = "r1tool:latest"  # Default model, can be overridden by environment variable
 DB_PATH = "memory.db"
 MEMORY_FEATURE_ENABLED = os.getenv("MEMORY_FEATURE_ENABLED", "false").lower() == "true"
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:12345")
+
+config = {
+    "vector_store": {
+        "provider": "chroma",
+        "config": {
+            "path": ".cache/slack_agent/chroma_db",
+            "collection_name": "memory_collection",
+        }
+    },
+    "llm": {
+        "provider": "ollama",
+        "config": {
+            "model": MODEL,
+            "temperature": 0.1,
+            "max_tokens": 2000,
+            "ollama_base_url": OLLAMA_BASE_URL,
+        }
+    },
+    "embedder": {
+        "provider": "ollama",
+        "config": {
+            "model": "mxbai-embed-large",
+            "ollama_base_url": OLLAMA_BASE_URL,
+        }
+    },
+}
+
+memory = Memory.from_config(config)
+
+async def chat_with_memories(message: str, user_id: str = "default_user") -> str:
+    # Retrieve relevant memories
+    relevant_memories = memory.search(query=message, user_id=user_id, limit=3)
+    memories_str = "\n".join(f"- {entry['memory']}" for entry in relevant_memories["results"])
+
+    # Generate Assistant response
+    system_prompt = f"You are a helpful AI. Answer the question based on query and memories.\nUser Memories:\n{memories_str}"
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": message}]
+    response = await client.chat(
+        model=MODEL,
+        messages=messages,
+    ),
+    assistant_response = response.message.content.split('</think>')[-1].strip()
+    # Create new memories from the conversation
+    messages.append({"role": "assistant", "content": assistant_response})
+    memory.add(messages, user_id=user_id)
+
+    return assistant_response
 
 
 # Define Pydantic model for system prompt rules

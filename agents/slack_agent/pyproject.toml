@@ -30,7 +30,8 @@ dependencies = [
     "httpx",
     "httpcore",
     "certifi",
-    "h11", 
+    "h11",
+    "mem0ai>=0.1.108",
 ]
 
 [tool.setuptools]
